@@ -1,0 +1,31 @@
+# Sistema operacional
+.DS_Store
+Thumbs.db
+
+# VS Code e IDEs
+.vscode/
+.idea/
+
+# Logs
+*.log
+
+# Variáveis de ambiente
+.env
+.env.*
+!.env.example
+
+# Dependências e builds comuns
+node_modules/
+dist/
+build/
+out/
+target/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Java
+*.class
