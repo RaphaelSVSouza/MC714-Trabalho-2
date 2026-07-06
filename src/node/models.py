@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -10,6 +10,8 @@ ELECTION = "ELECTION"
 ELECTION_OK = "ELECTION_OK"
 COORDINATOR = "COORDINATOR"
 HEARTBEAT = "HEARTBEAT"
+
+EventKind = Literal["lamport_event", "annotation"]
 
 
 class AppMessage(BaseModel):
@@ -46,6 +48,7 @@ class EventRecord(BaseModel):
     wall_time: str
     logical_time: int
     node_id: int
+    event_kind: EventKind
     action: str
     peer_id: int | None = None
     peer_role: str | None = None

@@ -15,6 +15,7 @@ async def test_local_event_increments_clock_and_stores_event() -> None:
     snapshot = await state.snapshot()
 
     assert event.action == "LOCAL"
+    assert event.event_kind == "lamport_event"
     assert event.logical_time == 1
     assert snapshot["logical_clock"] == 1
 
@@ -30,8 +31,10 @@ async def test_prepare_app_message_ticks_once_and_captures_timestamp() -> None:
     assert message.type == APP_MESSAGE
     assert message.logical_time == 1
     assert event.logical_time == 1
+    assert event.event_kind == "lamport_event"
     assert events[0]["logical_time"] == 1
     assert events[0]["action"] == "SEND"
+    assert events[0]["event_kind"] == "lamport_event"
     assert snapshot["logical_clock"] == 1
     assert snapshot["messages_sent"] == 0
 
@@ -62,6 +65,7 @@ async def test_record_send_failed_stores_event_without_incrementing_sent_counter
     assert snapshot["logical_clock"] == 1
     assert [event["action"] for event in events] == ["SEND", "SEND_FAILED"]
     assert events[1]["logical_time"] == 1
+    assert events[1]["event_kind"] == "annotation"
     assert events[1]["detail"] == "connection refused"
 
 
@@ -80,6 +84,7 @@ async def test_record_received_updates_clock_before_storing_event() -> None:
     snapshot = await state.snapshot()
 
     assert event.action == "RECEIVE"
+    assert event.event_kind == "lamport_event"
     assert event.logical_time == 6
     assert snapshot["logical_clock"] == 6
     assert snapshot["messages_received"] == 1
@@ -234,10 +239,13 @@ async def test_timeout_abort_cleans_mutex_state_and_returns_deferred() -> None:
 
     deferred = await state.abort_mutex_request("req-1", "timeout")
     snapshot = await state.snapshot()
+    events = await state.events()
 
     assert deferred == [(2, "req-2")]
     assert snapshot["mutex"]["state"] == RELEASED
     assert snapshot["mutex"]["request_id"] is None
+    assert events[-1]["action"] == "MUTEX_ABORTED"
+    assert events[-1]["event_kind"] == "lamport_event"
 
 
 @pytest.mark.asyncio
@@ -250,8 +258,10 @@ async def test_enter_and_exit_critical_section_increment_clock() -> None:
     enter = await state.enter_critical_section("req-1")
     exit_event, _ = await state.exit_critical_section("req-1")
 
-    assert enter.logical_time == 4
-    assert exit_event.logical_time == 5
+    assert enter.logical_time == 5
+    assert enter.event_kind == "lamport_event"
+    assert exit_event.logical_time == 6
+    assert exit_event.event_kind == "lamport_event"
 
 
 def mutex_reply(sender_id: int, request_id: str, logical_time: int) -> AppMessage:

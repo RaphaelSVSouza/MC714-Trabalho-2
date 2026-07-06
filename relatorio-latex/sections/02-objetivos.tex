@@ -1,0 +1,21 @@
+\section{Objetivos e escopo}
+
+O objetivo geral foi manter um sistema distribuído simples, mas suficientemente completo para demonstrar comportamento real entre processos independentes executando em contêineres separados.
+
+Os objetivos específicos foram:
+
+\begin{itemize}
+    \item executar três nós idênticos em processos distintos;
+    \item trocar mensagens entre os nós usando HTTP/JSON;
+    \item manter estado local em memória, sem banco de dados ou arquivo compartilhado;
+    \item implementar e validar o relógio lógico de Lamport;
+    \item implementar e validar a exclusão mútua distribuída com Ricart-Agrawala;
+    \item implementar e validar a eleição de líder com Bully;
+    \item registrar a seção crítica em um observador externo chamado \code{resource};
+    \item criar testes unitários, smoke tests e experimentos reproduzíveis;
+    \item documentar decisões, limitações e rastreabilidade entre teoria e código.
+\end{itemize}
+
+O escopo permaneceu intencionalmente restrito.
+O projeto não inclui consenso, replicação, persistência, autenticação, frontend, dashboard, Kubernetes, banco de dados ou tolerância a partições.
+Essas escolhas mantiveram o trabalho alinhado ao enunciado e preservaram a comparabilidade com a teoria utilizada.

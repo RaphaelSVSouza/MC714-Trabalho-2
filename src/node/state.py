@@ -4,7 +4,7 @@ from collections import deque
 from datetime import datetime
 
 from .clock import LamportClock
-from .election import higher_peers, should_accept_coordinator, should_accept_election_ok
+from .election import higher_peers, should_accept_coordinator, should_accept_election_ok, should_accept_heartbeat
 from .models import APP_MESSAGE, AppMessage, EventRecord
 from .mutex import HELD, RELEASED, WANTED, should_defer_reply
 
@@ -16,6 +16,47 @@ class MutexBusyError(Exception):
 class MutexStateError(Exception):
     pass
 
+
+LAMPORT_EVENT_ACTIONS = {
+    "LOCAL",
+    "SEND",
+    "RECEIVE",
+    "MUTEX_WANTED",
+    "ENTER_CS",
+    "EXIT_CS",
+    "ELECTION_STARTED",
+    "BECAME_LEADER",
+    "LEADER_TIMEOUT",
+    "MUTEX_ABORTED",
+    "ELECTION_ROUND_TIMED_OUT",
+    "ELECTION_RETRY_SCHEDULED",
+    "ELECTION_ROUND_RESET",
+}
+
+ANNOTATION_ACTIONS = {
+    "SEND_FAILED",
+    "MUTEX_REQUEST_RECEIVED",
+    "MUTEX_REPLY_RECEIVED",
+    "MUTEX_REPLY_DEFERRED",
+    "MUTEX_HELD",
+    "MUTEX_RELEASED",
+    "ELECTION_RECEIVED",
+    "ELECTION_OK_RECEIVED",
+    "ELECTION_OK_IGNORED",
+    "COORDINATOR_RECEIVED",
+    "COORDINATOR_REJECTED",
+    "LEADER_CHANGED",
+    "HEARTBEAT_RECEIVED",
+    "HEARTBEAT_REJECTED",
+}
+
+
+def classify_event_kind(action: str) -> str:
+    if action in LAMPORT_EVENT_ACTIONS:
+        return "lamport_event"
+    if action in ANNOTATION_ACTIONS:
+        return "annotation"
+    return "annotation"
 
 class NodeState:
     def __init__(
@@ -307,7 +348,7 @@ class NodeState:
             wait_ms = 0.0
             if self.wait_started_at is not None:
                 wait_ms = (time.monotonic() - self.wait_started_at) * 1000
-            logical_time = self.clock.value
+            logical_time = self.clock.tick()
             event = self._new_event(
                 logical_time=logical_time,
                 action="MUTEX_HELD",
@@ -365,12 +406,12 @@ class NodeState:
         async with self._lock:
             if self.current_request_id != request_id:
                 return []
-            logical_time = self.clock.value
+            logical_time = self.clock.tick()
             deferred = sorted(self.deferred_replies.items())
             self._clear_mutex_request()
             event = self._new_event(
                 logical_time=logical_time,
-                action="MUTEX_RELEASED",
+                action="MUTEX_ABORTED",
                 request_id=request_id,
                 detail=reason,
             )
@@ -512,9 +553,8 @@ class NodeState:
                 leader_id=leader_id,
                 detail="coordinator",
             )
-            accepted = should_accept_coordinator(self.leader_id, leader_id) or self.election_in_progress
-            action = "LEADER_CHANGED" if accepted and self.leader_id != leader_id else "COORDINATOR_RECEIVED"
-            detail = "accepted" if accepted else "ignored lower-priority coordinator"
+            accepted = should_accept_coordinator(self.node_id, self.leader_id, leader_id)
+            action = "LEADER_CHANGED" if accepted and self.leader_id != leader_id else ("COORDINATOR_RECEIVED" if accepted else "COORDINATOR_REJECTED")
             if accepted:
                 self.leader_id = leader_id
                 self.election_in_progress = False
@@ -523,6 +563,9 @@ class NodeState:
                 self.election_ok_received = set()
                 self.last_leader_heartbeat = time.monotonic()
                 self.last_leader_change_wall_time = datetime.now().isoformat(timespec="milliseconds")
+                detail = "accepted"
+            else:
+                detail = "ignored lower-priority coordinator"
             coord_event = self._new_event(
                 logical_time=logical_time,
                 action=action,
@@ -551,7 +594,7 @@ class NodeState:
                 leader_id=leader_id,
                 detail="heartbeat",
             )
-            valid = leader_id == message.sender_id and should_accept_coordinator(self.leader_id, leader_id)
+            valid = should_accept_heartbeat(self.node_id, self.leader_id, message.sender_id, leader_id)
             if valid:
                 if self.leader_id != leader_id:
                     self.last_leader_change_wall_time = datetime.now().isoformat(timespec="milliseconds")
@@ -559,7 +602,7 @@ class NodeState:
                 self.last_leader_heartbeat = time.monotonic()
             heartbeat_event = self._new_event(
                 logical_time=logical_time,
-                action="HEARTBEAT_RECEIVED",
+                action="HEARTBEAT_RECEIVED" if valid else "HEARTBEAT_REJECTED",
                 peer_id=message.sender_id,
                 peer_role="source",
                 message=message,
@@ -608,7 +651,7 @@ class NodeState:
             self.election_ok_received = set()
             event = self._new_event(
                 logical_time=logical_time,
-                action="ELECTION_STARTED",
+                action="ELECTION_ROUND_TIMED_OUT",
                 election_id=election_id,
                 detail=f"retry after {reason}; previous_ok={old_ok}",
             )
@@ -697,6 +740,7 @@ class NodeState:
             request_timestamp=request_timestamp,
             election_id=election_id,
             leader_id=leader_id,
+            event_kind=classify_event_kind(action),
             detail=detail,
         )
 
@@ -730,6 +774,3 @@ def event_as_dict(event: EventRecord) -> dict[str, object]:
     if hasattr(event, "model_dump"):
         return event.model_dump()
     return event.dict()
-
-
-

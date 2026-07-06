@@ -1,0 +1,20 @@
+\section{Conclusão}
+
+O projeto chegou a uma versão funcional e documentada de um sistema distribuído didático.
+Foram implementados os três pilares esperados do trabalho: comunicação entre nós, exclusão mútua distribuída e eleição de líder.
+A revisão recente também corrigiu a parte mais sensível para auditoria: prioridade do Bully, classificação dos eventos, rastreabilidade das fontes e política de resultados.
+
+Do ponto de vista técnico, os principais ganhos foram:
+
+\begin{itemize}
+    \item uso real de HTTP/JSON entre contêineres;
+    \item controle de estado local por nó;
+    \item validação por testes unitários e smoke tests;
+    \item coleta de experimentos com rastreabilidade;
+    \item documentação das decisões de projeto.
+\end{itemize}
+
+Como limite assumido desde o início, o trabalho não tenta resolver consenso, particionamento de rede ou persistência durável.
+Esses itens ficaram fora do escopo para preservar foco e coerência com o enunciado.
+
+Em resumo, o que já foi feito até aqui forma uma base sólida para demonstrar conceitos clássicos de sistemas distribuídos com execução local reproduzível e clareza suficiente para avaliação acadêmica.

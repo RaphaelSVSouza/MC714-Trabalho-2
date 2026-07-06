@@ -1,0 +1,45 @@
+\section{Validação, testes e experimentos}
+
+A validação foi organizada em três camadas.
+A primeira camada é a suíte de testes unitários em \code{tests/unit/}, cobrindo relógio, mutex, eleição, modelos e estado.
+A segunda camada é a bateria de smoke tests em \code{scripts/}, usada para exercitar o sistema real em execução distribuída.
+A terceira camada é a coleta de experimentos reproduzíveis, com saída estruturada para análise posterior.
+
+Os scripts principais são:
+
+\begin{itemize}
+    \item \code{scripts/smoke_http.py};
+    \item \code{scripts/smoke_lamport.py};
+    \item \code{scripts/smoke_mutex.py};
+    \item \code{scripts/smoke_election.py};
+    \item \code{scripts/demo.py};
+    \item \code{scripts/run_experiments.py}.
+\end{itemize}
+
+\subsection{Resultados locais validados}
+
+Na revisão local, a suíte de testes executada com a virtualenv passou com 62 testes.
+A checagem de importação também confirmou o uso direto de \code{pydantic} no ambiente do projeto.
+
+Ao mesmo tempo, o Python do sistema ainda não possuía as dependências do projeto, e o Docker Engine não estava disponível no host no momento da revisão.
+Por isso, os smoke tests distribuídos e a regeneração dos experimentos não puderam ser executados novamente nesta passagem.
+Os resultados versionados abaixo permanecem como artefatos históricos do repositório:
+
+\begin{itemize}
+    \item \path{docs/results/README.md};
+    \item \path{docs/results/raw-results.json};
+    \item \path{docs/results/experiment-summary.csv}.
+\end{itemize}
+
+\subsection{Documentação de apoio}
+
+A documentação do projeto foi mantida de forma complementar ao código:
+
+\begin{itemize}
+    \item \code{README.md} resume a arquitetura, os comandos e os resultados;
+    \item \code{docs/decision-log.md} registra as decisões de projeto;
+    \item \code{docs/algorithm-traceability.md} liga teoria, código e testes;
+    \item \code{docs/references.md} consolida as referências acadêmicas e técnicas.
+\end{itemize}
+
+Isso reduz ambiguidade, facilita auditoria e ajuda a reconstituir o raciocínio usado em cada parte da implementação.

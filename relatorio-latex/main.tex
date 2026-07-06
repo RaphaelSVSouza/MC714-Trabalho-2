@@ -1,0 +1,71 @@
+\documentclass[12pt,a4paper,oneside]{article}
+
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage[brazilian]{babel}
+\usepackage{indentfirst}
+\usepackage{lmodern}
+\usepackage{geometry}
+\usepackage{array}
+\usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage{longtable}
+\usepackage{enumitem}
+\usepackage{setspace}
+\usepackage{hyperref}
+\usepackage{xcolor}
+
+\geometry{left=3cm,right=2cm,top=3cm,bottom=2cm}
+\setlength{\parindent}{1.25cm}
+\setlength{\parskip}{0pt}
+\onehalfspacing
+\setlist[itemize]{leftmargin=1.3cm}
+\newcommand{\code}[1]{\texttt{\detokenize{#1}}}
+
+\hypersetup{
+    colorlinks=true,
+    linkcolor=blue!60!black,
+    urlcolor=blue!60!black,
+    pdftitle={Relatório técnico - MC714 - Trabalho 2},
+}
+
+\begin{document}
+
+\begin{titlepage}
+    \centering
+    \vspace*{2cm}
+
+    {\large \textbf{MC714 - Sistemas Distribuídos}\par}
+    \vspace{1cm}
+    {\Large \textbf{Relatório técnico e de auditoria do projeto}\par}
+    \vspace{0.8cm}
+    {\large Implementação de sistemas distribuídos com HTTP/JSON entre contêineres\par}
+
+    \vfill
+
+    \begin{tabular}{>{\bfseries}l l}
+        Autores: & José Eduardo Santos Rabelo (RA 260551) \\
+                 & Raphael Salles Vitor de Souza (RA 223641) \\
+        Professor: & Luiz Fernando Bittencourt \\
+        Unidade: & IC - Instituto de Computação da Unicamp, Campinas \\
+        Semestre: & 1º semestre de 2026 \\
+        Disciplina: & MC714 - Sistemas Distribuídos \\
+        Projeto: & node1, node2, node3 e resource \\
+    \end{tabular}
+
+    \vfill
+    {\small Documento preparado em português claro, com foco no que foi implementado, corrigido e validado localmente.\par}
+\end{titlepage}
+
+\tableofcontents
+\newpage
+
+\input{sections/01-introducao}
+\input{sections/02-objetivos}
+\input{sections/03-arquitetura}
+\input{sections/04-desenvolvimento}
+\input{sections/05-validacao}
+\input{sections/06-conclusao}
+\input{sections/referencias}
+
+\end{document}

@@ -13,10 +13,14 @@ NODES = {
 IMPORTANT_ACTIONS = {
     "LEADER_TIMEOUT",
     "ELECTION_STARTED",
+    "ELECTION_ROUND_TIMED_OUT",
     "ELECTION_OK_RECEIVED",
     "ELECTION_OK_SENT",
     "COORDINATOR_SENT",
     "COORDINATOR_RECEIVED",
+    "COORDINATOR_REJECTED",
+    "HEARTBEAT_RECEIVED",
+    "HEARTBEAT_REJECTED",
     "LEADER_CHANGED",
     "BECAME_LEADER",
 }
@@ -139,6 +143,36 @@ def main() -> int:
             assert_leader_flags(initial_states, 3)
             print_phase("initial", 3, initial_states, initial_ms)
 
+            lower_message_time = max(state["logical_clock"] for state in initial_states.values()) + 1
+            lower_coordinator = client.post(
+                f"{NODES[3]}/messages",
+                json={
+                    "type": "COORDINATOR",
+                    "sender_id": 2,
+                    "message_id": f"lower-coordinator-{int(time.monotonic() * 1000)}",
+                    "logical_time": lower_message_time,
+                    "payload": {"leader_id": 2},
+                },
+            )
+            lower_coordinator.raise_for_status()
+            if lower_coordinator.json().get("accepted") is not False:
+                raise RuntimeError("node3 accepted a lower-priority coordinator")
+
+            lower_heartbeat = client.post(
+                f"{NODES[3]}/messages",
+                json={
+                    "type": "HEARTBEAT",
+                    "sender_id": 2,
+                    "message_id": f"lower-heartbeat-{int(time.monotonic() * 1000)}",
+                    "logical_time": lower_message_time + 1,
+                    "payload": {"leader_id": 2},
+                },
+            )
+            lower_heartbeat.raise_for_status()
+            if lower_heartbeat.json().get("accepted") is not False:
+                raise RuntimeError("node3 accepted a lower-priority heartbeat")
+
+            wait_for_leader(client, [1, 2, 3], 3)
             stopped_at = time.monotonic()
             run_compose("stop", "node3")
             after_stop_states, stopped_ms = wait_for_leader(client, [1, 2], 2)

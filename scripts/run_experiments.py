@@ -107,6 +107,7 @@ def wait_for_event(
     message_id: str | None = None,
     detail: str | None = None,
     request_id: str | None = None,
+    event_kind: str | None = None,
     timeout: float = 15.0,
 ) -> dict[str, object]:
     deadline = time.monotonic() + timeout
@@ -119,6 +120,8 @@ def wait_for_event(
             if detail is not None and event.get("detail") != detail:
                 continue
             if request_id is not None and event.get("request_id") != request_id:
+                continue
+            if event_kind is not None and event.get("event_kind") != event_kind:
                 continue
             return event
         time.sleep(0.2)
@@ -219,7 +222,7 @@ def collect_lamport_repetition(rep: int) -> dict[str, object]:
 
         local_description = f"experiment-lamport-{rep}-{int(time.time() * 1000)}"
         post_json(client, f"{NODES[1]}/commands/local-event", {"description": local_description})
-        local_event = wait_for_event(client, 1, "LOCAL", detail=local_description)
+        local_event = wait_for_event(client, 1, "LOCAL", detail=local_description, event_kind="lamport_event")
 
         send_12 = post_json(
             client,
@@ -227,8 +230,8 @@ def collect_lamport_repetition(rep: int) -> dict[str, object]:
             {"destination_id": 2, "text": f"lamport rep {rep} 1->2"},
         )
         msg_12 = str(send_12["message_id"])
-        send_event_12 = wait_for_event(client, 1, "SEND", message_id=msg_12)
-        recv_event_12 = wait_for_event(client, 2, "RECEIVE", message_id=msg_12)
+        send_event_12 = wait_for_event(client, 1, "SEND", message_id=msg_12, event_kind="lamport_event")
+        recv_event_12 = wait_for_event(client, 2, "RECEIVE", message_id=msg_12, event_kind="lamport_event")
 
         send_23 = post_json(
             client,
@@ -236,8 +239,8 @@ def collect_lamport_repetition(rep: int) -> dict[str, object]:
             {"destination_id": 3, "text": f"lamport rep {rep} 2->3"},
         )
         msg_23 = str(send_23["message_id"])
-        send_event_23 = wait_for_event(client, 2, "SEND", message_id=msg_23)
-        recv_event_23 = wait_for_event(client, 3, "RECEIVE", message_id=msg_23)
+        send_event_23 = wait_for_event(client, 2, "SEND", message_id=msg_23, event_kind="lamport_event")
+        recv_event_23 = wait_for_event(client, 3, "RECEIVE", message_id=msg_23, event_kind="lamport_event")
 
         relations = {
             "LOCAL(node1) < SEND(node1)": local_event["logical_time"] < send_event_12["logical_time"],
@@ -641,5 +644,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
-

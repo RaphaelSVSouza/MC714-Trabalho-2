@@ -1,0 +1,38 @@
+\section{Arquitetura do sistema}
+
+O sistema foi organizado em quatro serviços principais sob Docker Compose.
+Os três nós compartilham o mesmo código-fonte e mudam apenas por configuração de ambiente.
+
+\begin{table}[h]
+    \centering
+    \begin{tabularx}{\textwidth}{@{} l l X @{} }
+        \toprule
+        Componente & Papel & Observações \\
+        \midrule
+        \code{node1}, \code{node2}, \code{node3} & Nós distribuídos & Executam FastAPI, Uvicorn e HTTPX; cada um mantém estado local em memória. \\
+        \code{resource} & Observador & Registra entrada, saída e sobreposição na seção crítica; não decide prioridade. \\
+        \code{docker-compose.yml} & Orquestração & Sobe a pilha local com um contêiner por nó. \\
+        \code{Dockerfile} & Empacotamento & Define a imagem base da aplicação. \\
+        \code{scripts/} & Automação & Contém smoke tests, demonstração e experimentos. \\
+        \code{tests/} & Validação & Suíte unitária para relógio, mutex, eleição e estado. \\
+        \bottomrule
+    \end{tabularx}
+    \caption{Componentes principais do projeto}
+\end{table}
+
+A comunicação entre os processos usa envelopes JSON enviados por HTTP.
+Essa decisão preserva a visibilidade do fluxo de mensagens e facilita a inspeção por logs e por scripts de validação.
+Cada envio aparece como chamada HTTP real entre contêineres, o que torna o comportamento observável de ponta a ponta.
+
+Os endpoints principais dos nós incluem:
+
+\begin{itemize}
+    \item \code{GET /health} para verificação básica;
+    \item \code{GET /state} para inspecionar o estado local;
+    \item \code{GET /events} para recuperar eventos registrados;
+    \item \code{POST /messages} para receber mensagens entre nós;
+    \item \code{POST /commands/local-event} para gerar evento local;
+    \item \code{POST /commands/send-message} para enviar mensagem a outro nó;
+    \item \code{POST /commands/request-critical-section} para solicitar a seção crítica;
+    \item \code{POST /commands/start-election} para disparar uma eleição manual.
+\end{itemize}

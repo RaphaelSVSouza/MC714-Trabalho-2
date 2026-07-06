@@ -10,7 +10,10 @@ Thumbs.db
 *.log
 
 # Resultados gerados por scripts
-docs/results/
+docs/results/*
+!docs/results/README.md
+!docs/results/raw-results.json
+!docs/results/experiment-summary.csv
 
 # Variaveis de ambiente
 .env

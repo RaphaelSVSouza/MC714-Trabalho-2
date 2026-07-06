@@ -1,0 +1,11 @@
+experiment,metric,repetitions,min,max,mean,median,violations,observations
+lamport_causality,violations,5,0,0,0,0,0,zero violations expected
+mutex_single,protocol_messages,5,4,4,4,4,0,expected 4 messages per request for 3 nodes
+mutex_single,wait_ms,5,51.497,107.261,71.6924,69.893,0,waiting time for single CS request
+mutex_single,resource_duration_ms,5,162.0,166.0,164.6,165.0,0,observed duration in resource log
+mutex_concurrent,wait_ms,15,92.391,656.909,368.7994,365.407,0,three concurrent requests
+mutex_concurrent,resource_duration_ms,15,213.0,218.0,215.26666666666668,215.0,0,observed critical-section duration
+mutex_concurrent,deferred_replies,15,0,2,1,1,0,responses deferred under RA
+election,stop_detection_ms,5,3890.00000001397,4906.000000075437,4293.600000045262,4391.000000061467,0,node3 stopped then node2 became leader
+election,recovery_ms,5,577.9999999795109,843.9999999245629,662.5999999931082,625.0,0,node3 recovered and reassumed leadership
+election,total_phase_ms,5,4531.000000075437,5624.000000068918,4999.800000037067,5000.000000116415,0,initial convergence + failure + recovery

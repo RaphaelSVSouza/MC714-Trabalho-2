@@ -269,12 +269,16 @@ async def receive_coordinator(message: AppMessage) -> dict[str, object]:
         await state.record_received(message)
         raise HTTPException(status_code=400, detail="payload.leader_id must match sender_id")
     accepted = await state.handle_coordinator(message, leader_id)
+    if not accepted and leader_id < NODE_ID:
+        await schedule_election(f"received lower-priority coordinator from node {leader_id}")
     return {"status": "processed", "node_id": NODE_ID, "accepted": accepted, "leader_id": leader_id}
 
 
 async def receive_heartbeat(message: AppMessage) -> dict[str, object]:
     leader_id = require_int_payload(message, "leader_id")
     accepted = await state.handle_heartbeat(message, leader_id)
+    if not accepted and leader_id < NODE_ID:
+        await schedule_election(f"received lower-priority heartbeat from node {leader_id}")
     return {"status": "processed", "node_id": NODE_ID, "accepted": accepted, "leader_id": leader_id}
 
 
@@ -474,4 +478,3 @@ def require_int_payload(message: AppMessage, field: str) -> int:
     if not isinstance(value, int) or value < 0:
         raise HTTPException(status_code=400, detail=f"payload.{field} must be a non-negative integer")
     return value
-

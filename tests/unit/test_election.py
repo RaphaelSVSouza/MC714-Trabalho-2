@@ -2,7 +2,7 @@ import time
 
 import pytest
 
-from node.election import ElectionConfig, higher_peers, lower_peers, should_accept_election_ok
+from node.election import ElectionConfig, higher_peers, lower_peers, should_accept_coordinator, should_accept_election_ok
 from node.models import COORDINATOR, ELECTION, ELECTION_OK, HEARTBEAT, AppMessage
 from node.mutex import RELEASED
 from node.state import NodeState
@@ -14,6 +14,29 @@ def test_higher_and_lower_peers_are_selected_by_node_id() -> None:
     assert higher_peers(2, peers) == [(3, "http://node3:8000"), (4, "http://node4:8000")]
     assert lower_peers(2, peers) == [(1, "http://node1:8000")]
     assert higher_peers(4, peers) == []
+
+
+@pytest.mark.parametrize(
+    "node_id,current_leader_id,announced_leader_id,expected",
+    [
+        (1, None, 1, True),
+        (1, None, 2, True),
+        (1, None, 3, True),
+        (2, None, 1, False),
+        (3, None, 2, False),
+        (1, 2, 3, True),
+        (1, 3, 2, False),
+        (2, 3, 2, False),
+        (3, 3, 3, True),
+    ],
+)
+def test_coordinator_acceptance_matrix(
+    node_id: int,
+    current_leader_id: int | None,
+    announced_leader_id: int,
+    expected: bool,
+) -> None:
+    assert should_accept_coordinator(node_id, current_leader_id, announced_leader_id) is expected
 
 
 def test_election_config_requires_coherent_positive_timeouts() -> None:
@@ -117,14 +140,82 @@ async def test_coordinator_updates_leader_and_clears_election() -> None:
 
 
 @pytest.mark.asyncio
-async def test_lower_priority_coordinator_does_not_replace_higher_leader() -> None:
+async def test_lower_coordinator_is_rejected_during_active_election() -> None:
     state = NodeState(node_id=1, peers={2: "http://node2:8000", 3: "http://node3:8000"})
-    await state.handle_coordinator(message(COORDINATOR, 3, 3, {"leader_id": 3}), 3)
+    await state.begin_election("e1", time.monotonic(), "test")
+    await state.handle_heartbeat(message(HEARTBEAT, 3, 2, {"leader_id": 3}), 3)
 
     accepted = await state.handle_coordinator(message(COORDINATOR, 2, 4, {"leader_id": 2}), 2)
+    snapshot = await state.snapshot()
 
     assert accepted is False
-    assert (await state.snapshot())["election"]["leader_id"] == 3
+    assert snapshot["election"]["leader_id"] == 3
+    assert snapshot["election"]["election_in_progress"] is True
+    assert snapshot["election"]["election_id"] == "e1"
+
+
+@pytest.mark.asyncio
+async def test_rejected_coordinator_does_not_clear_active_election() -> None:
+    state = NodeState(node_id=1, peers={2: "http://node2:8000", 3: "http://node3:8000"})
+    state.leader_id = 3
+    await state.begin_election("e1", time.monotonic(), "test")
+
+    accepted = await state.handle_coordinator(message(COORDINATOR, 2, 4, {"leader_id": 2}), 2)
+    snapshot = await state.snapshot()
+
+    assert accepted is False
+    assert snapshot["election"]["election_in_progress"] is True
+    assert snapshot["election"]["election_id"] == "e1"
+    assert snapshot["election"]["leader_id"] == 3
+
+
+@pytest.mark.asyncio
+async def test_node_rejects_coordinator_lower_than_its_own_id() -> None:
+    state = NodeState(node_id=3, peers={1: "http://node1:8000", 2: "http://node2:8000"})
+
+    accepted = await state.handle_coordinator(message(COORDINATOR, 2, 2, {"leader_id": 2}), 2)
+    snapshot = await state.snapshot()
+
+    assert accepted is False
+    assert snapshot["election"]["leader_id"] is None
+    assert snapshot["election"]["election_in_progress"] is False
+
+
+@pytest.mark.asyncio
+async def test_higher_coordinator_is_accepted_during_active_election() -> None:
+    state = NodeState(node_id=1, peers={2: "http://node2:8000", 3: "http://node3:8000"})
+    await state.begin_election("e1", time.monotonic(), "test")
+
+    accepted = await state.handle_coordinator(message(COORDINATOR, 3, 3, {"leader_id": 3}), 3)
+    snapshot = await state.snapshot()
+
+    assert accepted is True
+    assert snapshot["election"]["leader_id"] == 3
+    assert snapshot["election"]["election_in_progress"] is False
+    assert snapshot["election"]["election_id"] is None
+
+
+@pytest.mark.asyncio
+async def test_lower_heartbeat_does_not_replace_higher_leader() -> None:
+    state = NodeState(node_id=1, peers={2: "http://node2:8000", 3: "http://node3:8000"})
+    await state.handle_heartbeat(message(HEARTBEAT, 3, 2, {"leader_id": 3}), 3)
+
+    accepted = await state.handle_heartbeat(message(HEARTBEAT, 2, 3, {"leader_id": 2}), 2)
+    snapshot = await state.snapshot()
+
+    assert accepted is False
+    assert snapshot["election"]["leader_id"] == 3
+
+
+@pytest.mark.asyncio
+async def test_node_rejects_heartbeat_lower_than_its_own_id() -> None:
+    state = NodeState(node_id=3, peers={1: "http://node1:8000", 2: "http://node2:8000"})
+
+    accepted = await state.handle_heartbeat(message(HEARTBEAT, 2, 2, {"leader_id": 2}), 2)
+    snapshot = await state.snapshot()
+
+    assert accepted is False
+    assert snapshot["election"]["leader_id"] is None
 
 
 @pytest.mark.asyncio

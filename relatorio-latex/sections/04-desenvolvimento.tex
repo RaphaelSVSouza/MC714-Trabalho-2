@@ -1,0 +1,100 @@
+\section{Desenvolvimento e implementação}
+
+\subsection{Base do projeto}
+
+A primeira etapa foi estruturar o ambiente executável e reproduzível.
+O repositório passou a usar Python 3.12, FastAPI, Uvicorn e HTTPX, com organização em \code{src/}, \code{tests/}, \code{scripts/} e \code{docs/}.
+O empacotamento foi definido em \code{pyproject.toml}, e a execução local foi padronizada com Docker Compose.
+
+Essa base permitiu separar com clareza o que é configuração, o que é implementação e o que é automação.
+Também facilitou a evolução incremental do projeto sem perder rastreabilidade.
+
+\subsection{Modelo de mensagens e estado}
+
+O módulo \code{src/node/models.py} define os tipos de mensagens e comandos usados pelo sistema.
+O envelope comum inclui identificador do remetente, identificador da mensagem, tempo lógico e um \code{payload} flexível.
+Isso permitiu reusar a mesma infraestrutura para mensagens de aplicação, mutex e eleição.
+
+O estado de cada nó fica concentrado em memória e é gerenciado por uma classe central em \code{src/node/state.py}.
+Ali estão as responsabilidades de:
+
+\begin{itemize}
+    \item registrar eventos locais e recebidos;
+    \item atualizar o relógio de Lamport;
+    \item controlar estados da exclusão mútua;
+    \item administrar o estado de eleição e líder;
+    \item expor snapshots para inspeção via API.
+\end{itemize}
+
+\subsection{Correções de Lamport e do log de eventos}
+
+A revisão recente formalizou a diferença entre evento Lamport e anotação de observabilidade.
+Os registros que avançam ou atualizam o relógio foram classificados como \code{lamport_event}; os registros que apenas detalham o mesmo acontecimento foram classificados como \code{annotation}.
+
+Também ficou explícito que o timestamp da mensagem é o timestamp do evento de envio e que o recebimento atualiza o relógio antes do registro do evento correspondente.
+Essa separação evita interpretar o log de \code{/events} como uma sequência um-para-um de eventos teóricos.
+
+\subsection{Exclusão mútua distribuída}
+
+A exclusão mútua foi modelada com o algoritmo de Ricart-Agrawala.
+Foram adotados os estados \code{RELEASED}, \code{WANTED} e \code{HELD}, e a prioridade segue o par \code{(request_timestamp, node_id)}.
+
+Durante uma solicitação de seção crítica, o nó:
+
+\begin{enumerate}
+    \item fixa um \code{request_timestamp} para toda a tentativa;
+    \item envia \code{MUTEX_REQUEST} para os outros nós;
+    \item aguarda \code{MUTEX_REPLY} até receber todas as respostas esperadas;
+    \item entra na seção crítica;
+    \item notifica o observador \code{resource} na entrada e na saída;
+    \item libera respostas adiadas ao final.
+\end{enumerate}
+
+A revisão também renomeou o timeout que encerra uma tentativa sem sucesso para \code{MUTEX_ABORTED}.
+Isso separa saída normal, timeout e erro de transporte, evitando ambiguidades no log e nos testes.
+
+O observador \code{resource} foi propositalmente mantido fora da decisão de acesso.
+Ele só registra \code{ENTER} e \code{EXIT} e conta sobreposições, o que ajuda a verificar se a exclusão mútua está funcionando sem centralizar o controle.
+
+\subsection{Eleição de líder}
+
+A eleição de líder foi implementada com uma adaptação didática do Bully.
+Os nós trocam mensagens \code{ELECTION}, \code{ELECTION_OK}, \code{COORDINATOR} e \code{HEARTBEAT}.
+O maior \code{node_id} ativo deve assumir como líder.
+
+A revisão recente corrigiu a aceitação de coordenador e heartbeat para respeitar três critérios ao mesmo tempo:
+
+\begin{itemize}
+    \item o identificador do próprio nó;
+    \item o líder atualmente conhecido;
+    \item a prioridade anunciada na mensagem.
+\end{itemize}
+
+Com isso, um líder inferior não substitui um líder superior e um anúncio coerente de nó inferior pode provocar nova eleição quando apropriado.
+O identificador \code{election_id} continua sendo uma adaptação local para ignorar respostas antigas ou duplicadas.
+
+\subsection{Ferramentas e dependências}
+
+A revisão também tornou \code{pydantic} uma dependência direta do projeto.
+Isso evita depender apenas da instalação transitiva trazida por FastAPI e deixa a configuração mais explícita.
+
+Outro ponto de rastreabilidade foi a política de resultados.
+Os artefatos em \path{docs/results/} passaram a ser versionáveis.
+Essa decisão alinha o README com os dados efetivamente produzidos.
+
+\subsection{Marcos executados}
+
+Em termos práticos, o trabalho passou pelos seguintes marcos:
+
+\begin{itemize}
+    \item configuração do runtime e da orquestração local;
+    \item implementação dos nós distribuídos com API HTTP;
+    \item adição do relógio de Lamport;
+    \item adição da exclusão mútua com observador externo;
+    \item adição da eleição de líder e do heartbeat;
+    \item revisão da aceitação de coordenador e heartbeat;
+    \item classificação explícita entre evento e anotação;
+    \item criação dos smoke tests e da demonstração automatizada;
+    \item criação dos experimentos e captura dos resultados;
+    \item fechamento com documentação de decisão, rastreabilidade e referências.
+\end{itemize}

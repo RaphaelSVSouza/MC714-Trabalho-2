@@ -47,9 +47,9 @@ class ElectionConfig:
 def higher_peers(node_id: int, peers: dict[int, str]) -> list[tuple[int, str]]:
     return [(peer_id, peers[peer_id]) for peer_id in sorted(peers) if peer_id > node_id]
 
+
 def lower_peers(node_id: int, peers: dict[int, str]) -> list[tuple[int, str]]:
     return [(peer_id, peers[peer_id]) for peer_id in sorted(peers) if peer_id < node_id]
-
 
 
 def should_accept_election_ok(
@@ -66,7 +66,26 @@ def should_accept_election_ok(
     )
 
 
-def should_accept_coordinator(current_leader_id: int | None, announced_leader_id: int) -> bool:
-    return current_leader_id is None or announced_leader_id >= current_leader_id
+def should_accept_coordinator(
+    node_id: int,
+    current_leader_id: int | None,
+    announced_leader_id: int,
+) -> bool:
+    if announced_leader_id < node_id:
+        return False
+    if current_leader_id is not None and announced_leader_id < current_leader_id:
+        return False
+    return True
 
 
+def should_accept_heartbeat(
+    node_id: int,
+    current_leader_id: int | None,
+    sender_id: int,
+    announced_leader_id: int,
+) -> bool:
+    return sender_id == announced_leader_id and should_accept_coordinator(
+        node_id,
+        current_leader_id,
+        announced_leader_id,
+    )

@@ -45,6 +45,7 @@ def wait_for_event(
     action: str,
     message_id: str | None = None,
     detail: str | None = None,
+    event_kind: str | None = None,
     timeout: float = 10.0,
 ) -> dict[str, object]:
     deadline = time.monotonic() + timeout
@@ -55,6 +56,8 @@ def wait_for_event(
             if message_id is not None and event.get("message_id") != message_id:
                 continue
             if detail is not None and event.get("detail") != detail:
+                continue
+            if event_kind is not None and event.get("event_kind") != event_kind:
                 continue
             return event
         time.sleep(0.25)
@@ -89,7 +92,7 @@ def main() -> int:
 
             local_description = f"lamport local event {uuid4()}"
             post_json(client, 1, "/commands/local-event", {"description": local_description})
-            local_event = wait_for_event(client, 1, "LOCAL", detail=local_description)
+            local_event = wait_for_event(client, 1, "LOCAL", detail=local_description, event_kind="lamport_event")
 
             first_send = post_json(
                 client,
@@ -98,8 +101,8 @@ def main() -> int:
                 {"destination_id": 2, "text": "lamport message node1 to node2"},
             )
             msg_a = first_send["message_id"]
-            send_a = wait_for_event(client, 1, "SEND", message_id=msg_a)
-            receive_a = wait_for_event(client, 2, "RECEIVE", message_id=msg_a)
+            send_a = wait_for_event(client, 1, "SEND", message_id=msg_a, event_kind="lamport_event")
+            receive_a = wait_for_event(client, 2, "RECEIVE", message_id=msg_a, event_kind="lamport_event")
 
             second_send = post_json(
                 client,
@@ -108,8 +111,8 @@ def main() -> int:
                 {"destination_id": 3, "text": "lamport message node2 to node3"},
             )
             msg_b = second_send["message_id"]
-            send_b = wait_for_event(client, 2, "SEND", message_id=msg_b)
-            receive_b = wait_for_event(client, 3, "RECEIVE", message_id=msg_b)
+            send_b = wait_for_event(client, 2, "SEND", message_id=msg_b, event_kind="lamport_event")
+            receive_b = wait_for_event(client, 3, "RECEIVE", message_id=msg_b, event_kind="lamport_event")
 
             if not send_a["logical_time"] < receive_a["logical_time"]:
                 raise RuntimeError("node1->node2 Lamport relation failed")
