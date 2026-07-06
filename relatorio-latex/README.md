@@ -11,6 +11,8 @@ Este diretório contém o relatório técnico do Trabalho 2 da MC714. O texto es
 - `sections/04-desenvolvimento.tex`: implementação de Lamport, Ricart-Agrawala e Bully.
 - `sections/05-validacao.tex`: testes, experimentos, resultados e ameaças à validade.
 - `sections/06-conclusao.tex`: síntese, limitações e extensões.
+- `sections/07-fontes-codigo.tex`: fontes de código, autoria e adaptações de bibliotecas.
+- `sections/08-uso-de-ia.tex`: declaração de uso de ferramentas de inteligência artificial.
 - `sections/referencias.tex`: bibliografia acadêmica e documentação oficial.
 
 ## Compilação
