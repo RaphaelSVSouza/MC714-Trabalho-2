@@ -1,0 +1,26 @@
+\section{Fontes de código e declaração de autoria}
+\label{sec:fontes-codigo}
+
+Todo o código deste trabalho foi escrito pelos autores. Os três algoritmos --- relógio lógico de Lamport, exclusão mútua de Ricart--Agrawala e eleição pelo algoritmo Bully --- foram implementados a partir dos artigos originais citados na Seção~\ref{sec:objetivos} \cite{lamport1978,ricart1981,garcia1982}, sem reutilizar ou adaptar implementações prontas de terceiros. Nenhum trecho foi copiado de repositórios externos, fóruns ou soluções publicadas dos algoritmos.
+
+A configuração e o uso das bibliotecas seguem os exemplos das documentações oficiais referenciadas neste relatório, adaptados às necessidades do projeto:
+
+\begin{table}[H]
+    \centering
+    \small
+    \begin{tabularx}{\textwidth}{@{}>{\raggedright\arraybackslash}p{3.4cm}p{2.4cm}X@{}}
+        \toprule
+        Origem & Fonte & Adaptação feita pelos autores \\
+        \midrule
+        Aplicação ASGI e \code{lifespan} & FastAPI \cite{fastapi} & Endpoints próprios (\code{/messages}, \code{/commands/*}); o \code{lifespan} inicia e encerra as tarefas de heartbeat e de eleição. \\
+        Cliente HTTP assíncrono & HTTPX \cite{httpx} & Envio do envelope \code{AppMessage} entre nós e notificação ao observador. \\
+        Modelos e validação & Pydantic \cite{pydantic} & Definição de \code{AppMessage}, dos comandos e do registro de eventos, com restrições (timestamp não negativo, duração da seção crítica). \\
+        Imagem e orquestração & Dockerfile \cite{dockerfile}, Compose \cite{compose} & Imagem única reaproveitada pelos quatro serviços; \code{NODE_ID}, \code{PEERS}, timeouts e \code{healthcheck} definidos pelos autores. \\
+        Servidor ASGI & Uvicorn \cite{uvicorn} & Execução dos módulos com \code{--host 0.0.0.0 --port 8000}. \\
+        \bottomrule
+    \end{tabularx}
+    \caption{Fontes de código de terceiros e alterações realizadas.}
+    \label{tab:fontes-codigo}
+\end{table}
+
+Em resumo, o material de terceiros restringe-se ao uso de bibliotecas por meio de suas APIs e exemplos oficiais; a lógica dos algoritmos, o modelo de estado e os testes são de autoria própria.
