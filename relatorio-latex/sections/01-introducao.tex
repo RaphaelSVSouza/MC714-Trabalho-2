@@ -1,10 +1,20 @@
 \section{Introdução}
 
-Este relatório registra, de forma objetiva, o que já foi construído e o que foi corrigido na revisão local do Trabalho 2 da MC714.
-O projeto foi estruturado como uma implementação acadêmica de sistemas distribuídos com comunicação HTTP/JSON real entre três nós e um observador externo.
+Sistemas distribuídos são formados por processos independentes que cooperam por troca de mensagens e que, em geral, não compartilham um relógio físico global nem uma memória comum. Essa ausência de uma visão instantânea e única do sistema torna necessárias abstrações para representar causalidade, coordenar o acesso a recursos e escolher um processo responsável por determinadas funções.
 
-A revisão recente teve dois focos complementares.
-O primeiro foi técnico: alinhar o código com a semântica esperada para o relógio de Lamport, a exclusão mútua de Ricart-Agrawala e a eleição de líder com Bully.
-O segundo foi documental: aumentar a rastreabilidade entre teoria, código, testes, smoke tests, experimentos e resultados versionados.
+O Trabalho 2 da disciplina MC714 materializa esses problemas em uma implementação local, executável e observável. O sistema possui três nós homogêneos --- \code{node1}, \code{node2} e \code{node3} --- e um serviço auxiliar chamado \code{resource}. Cada nó é um processo independente, mantém somente estado local em memória e troca mensagens reais por HTTP/JSON. A pilha é orquestrada com Docker Compose, permitindo parar e recuperar processos sem substituir a comunicação distribuída por objetos no mesmo processo ou arquivos compartilhados.
 
-O resultado é uma base local mais clara para avaliação acadêmica, ainda sem extrapolar o escopo original do trabalho.
+A implementação integra três mecanismos clássicos. O primeiro é o relógio lógico de Lamport, usado para associar timestamps a eventos e preservar a condição de precedência causal: quando um evento pode ter influenciado outro, seu timestamp deve ser menor \cite{lamport1978}. O segundo é a exclusão mútua distribuída de Ricart--Agrawala, na qual cada processo solicita autorização aos demais e desempata pedidos concorrentes por uma ordem total \cite{ricart1981}. O terceiro é uma adaptação do algoritmo Bully, que elege como coordenador o processo ativo de maior identificador \cite{garcia1982}.
+
+Além de implementar os algoritmos, o projeto busca tornar o comportamento auditável. Para isso, expõe endpoints de inspeção, registra um histórico local de eventos, possui testes unitários, executa smoke tests sobre a pilha real e gera resultados estruturados em JSON e CSV. O modelo também distingue explicitamente evento lógico de anotação de observabilidade e aplica uma regra de prioridade consistente na aceitação de coordenadores e heartbeats.
+
+Este relatório tem quatro objetivos principais:
+
+\begin{itemize}
+    \item apresentar a arquitetura e as decisões de projeto;
+    \item relacionar as regras teóricas com sua concretização no código;
+    \item descrever a metodologia de validação e interpretar os resultados disponíveis;
+    \item registrar limitações, adaptações e ameaças à validade sem atribuir aos algoritmos garantias que não foram implementadas.
+\end{itemize}
+
+O relatório está organizado da seguinte forma. A Seção~\ref{sec:objetivos} apresenta objetivos, requisitos e a fundamentação teórica dos três algoritmos. A Seção~\ref{sec:arquitetura} descreve a arquitetura, o modelo de mensagens e a API. A Seção~\ref{sec:desenvolvimento} detalha a implementação de cada mecanismo. A Seção~\ref{sec:validacao} trata da estratégia de validação, dos testes e dos experimentos. A Seção~\ref{sec:conclusao} sintetiza os resultados e discute limitações e extensões.

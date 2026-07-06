@@ -1,38 +1,163 @@
 \section{Arquitetura do sistema}
+\label{sec:arquitetura}
 
-O sistema foi organizado em quatro serviços principais sob Docker Compose.
-Os três nós compartilham o mesmo código-fonte e mudam apenas por configuração de ambiente.
+\subsection{Visão geral}
 
-\begin{table}[h]
+A aplicação é composta por quatro serviços definidos em \code{docker-compose.yml} \cite{compose}. Os três nós executam a mesma imagem e o mesmo módulo ASGI; as diferenças são fornecidas pelas variáveis \code{NODE_ID} e \code{PEERS}. O quarto serviço, \code{resource}, executa outro módulo FastAPI e atua somente como observador da seção crítica.
+
+\begin{figure}[H]
     \centering
-    \begin{tabularx}{\textwidth}{@{} l l X @{} }
+    \begin{tikzpicture}[
+        >=Latex,
+        service/.style={draw,rounded corners,minimum width=3cm,minimum height=1.1cm,align=center,fill=blue!5,font=\small},
+        observer/.style={draw,rounded corners,minimum width=4.4cm,minimum height=1.1cm,align=center,fill=green!8,font=\small},
+        link/.style={<->,thick},
+        notify/.style={->,thick,darkgreen}
+    ]
+        \node[service] (n1) {\textbf{node1}\\ID 1 \textbar{} porta 8001};
+        \node[service,right=2.6cm of n1] (n2) {\textbf{node2}\\ID 2 \textbar{} porta 8002};
+        \node[service,right=2.6cm of n2] (n3) {\textbf{node3}\\ID 3 \textbar{} porta 8003};
+        \node[observer,below=2.4cm of n2] (res) {\textbf{resource}\\observador \textbar{} porta 8010};
+
+        % Malha completa entre os nós (aplicação, mutex, eleição, heartbeat).
+        \draw[link] (n1) -- (n2);
+        \draw[link] (n2) -- (n3);
+        \draw[link] (n1) to[bend left=30] node[above,font=\footnotesize]{HTTP/JSON} (n3);
+
+        % Notificações unidirecionais para o observador.
+        \draw[notify] (n1) -- (res.north west);
+        \draw[notify] (n2) -- node[right,font=\footnotesize]{\code{/enter}, \code{/exit}} (res.north);
+        \draw[notify] (n3) -- (res.north east);
+    \end{tikzpicture}
+    \caption{Topologia lógica e serviços expostos no host. As arestas bidirecionais entre os nós formam uma malha completa e transportam mensagens de aplicação, mutex, eleição e heartbeat.}
+    \label{fig:topologia}
+\end{figure}
+
+As arestas entre os nós representam mensagens de aplicação, mutex, eleição e heartbeat. As setas para \code{resource} são notificações de entrada e saída da seção crítica; não existe seta de volta, porque o observador não concede permissão.
+
+\subsection{Componentes e responsabilidades}
+
+\begin{table}[H]
+    \centering
+    \small
+    \begin{tabularx}{\textwidth}{@{}>{\raggedright\arraybackslash}p{4.7cm}X@{}}
         \toprule
-        Componente & Papel & Observações \\
+        Componente & Responsabilidade e observações \\
         \midrule
-        \code{node1}, \code{node2}, \code{node3} & Nós distribuídos & Executam FastAPI, Uvicorn e HTTPX; cada um mantém estado local em memória. \\
-        \code{resource} & Observador & Registra entrada, saída e sobreposição na seção crítica; não decide prioridade. \\
-        \code{docker-compose.yml} & Orquestração & Sobe a pilha local com um contêiner por nó. \\
-        \code{Dockerfile} & Empacotamento & Define a imagem base da aplicação. \\
-        \code{scripts/} & Automação & Contém smoke tests, demonstração e experimentos. \\
-        \code{tests/} & Validação & Suíte unitária para relógio, mutex, eleição e estado. \\
+        \path{src/node/main.py} & Expõe a API, recebe comandos, despacha mensagens e executa os fluxos da seção crítica, eleição e heartbeat. \\
+        \path{src/node/state.py} & Mantém o estado concorrente do nó e protege relógio, mutex, líder e histórico por \code{asyncio.Lock}. \\
+        \path{src/node/clock.py} & Implementa incremento local e atualização do relógio no recebimento. \\
+        \path{src/node/mutex.py} & Define estados, prioridade e regra de adiamento de respostas. \\
+        \path{src/node/election.py} & Valida timeouts, seleciona peers superiores e decide aceitação de líder. \\
+        \path{src/node/models.py} & Define mensagens, comandos e registros validados por Pydantic. \\
+        \path{src/node/transport.py} & Serializa o envelope e realiza chamadas HTTP com HTTPX. \\
+        \path{src/resource/main.py} & Registra \code{ENTER}, \code{EXIT} e sobreposição, sem autorizar acesso. \\
         \bottomrule
     \end{tabularx}
-    \caption{Componentes principais do projeto}
+    \caption{Divisão de responsabilidades no código.}
+    \label{tab:componentes}
 \end{table}
 
-A comunicação entre os processos usa envelopes JSON enviados por HTTP.
-Essa decisão preserva a visibilidade do fluxo de mensagens e facilita a inspeção por logs e por scripts de validação.
-Cada envio aparece como chamada HTTP real entre contêineres, o que torna o comportamento observável de ponta a ponta.
+\subsection{Estrutura interna de um nó}
 
-Os endpoints principais dos nós incluem:
+Cada nó mantém quatro grupos de estado: configuração de peers, relógio e contadores, exclusão mútua e eleição. A Figura~\ref{fig:no-interno} resume o fluxo entre as camadas.
 
-\begin{itemize}
-    \item \code{GET /health} para verificação básica;
-    \item \code{GET /state} para inspecionar o estado local;
-    \item \code{GET /events} para recuperar eventos registrados;
-    \item \code{POST /messages} para receber mensagens entre nós;
-    \item \code{POST /commands/local-event} para gerar evento local;
-    \item \code{POST /commands/send-message} para enviar mensagem a outro nó;
-    \item \code{POST /commands/request-critical-section} para solicitar a seção crítica;
-    \item \code{POST /commands/start-election} para disparar uma eleição manual.
-\end{itemize}
+\begin{figure}[H]
+    \centering
+    \begin{tikzpicture}[
+        >=Latex,
+        layer/.style={draw,rounded corners,minimum height=0.95cm,align=center,font=\small},
+        wide/.style={layer,minimum width=9.6cm},
+        mod/.style={layer,minimum width=2.9cm,fill=gray!8},
+        down/.style={->,thick},
+        both/.style={<->,thick}
+    ]
+        \node[wide,fill=blue!7] (api) {\textbf{FastAPI} (\code{main.py}) --- endpoints, comandos e \code{POST /messages}};
+        \node[wide,below=1cm of api,fill=green!8] (state) {\textbf{\code{NodeState}} + \code{asyncio.Lock} --- estado local protegido};
+        \node[mod,below=1.25cm of state] (mutex) {\code{mutex.py}\\prioridade e adiamento};
+        \node[mod,left=0.45cm of mutex] (clock) {\code{clock.py}\\relógio lógico};
+        \node[mod,right=0.45cm of mutex] (election) {\code{election.py}\\regras da eleição};
+        \node[wide,below=1.25cm of mutex,fill=orange!10] (transport) {\textbf{\code{transport.py}} (HTTPX) --- transporte HTTP entre nós};
+
+        \draw[both] (api) -- node[right,font=\scriptsize]{comandos / respostas} (state);
+        \draw[down] (state.south) -- (clock.north);
+        \draw[down] (state.south) -- (mutex.north);
+        \draw[down] (state.south) -- (election.north);
+        \draw[both] (api.west) to[bend right=60] node[left,font=\scriptsize]{envio e recebimento} (transport.west);
+    \end{tikzpicture}
+    \caption{Organização interna de cada nó em camadas. A API delega o transporte HTTP a \code{transport.py} e concentra o estado em \code{NodeState}, que aplica as funções puras de \code{clock.py}, \code{mutex.py} e \code{election.py}.}
+    \label{fig:no-interno}
+\end{figure}
+
+O lock do estado não substitui os algoritmos distribuídos. Ele apenas evita corridas entre corrotinas do mesmo processo ao modificar estruturas locais, como o conjunto de respostas recebidas ou o valor do relógio. A exclusão entre processos continua dependendo das mensagens do protocolo.
+
+\subsection{Envelope de mensagens}
+
+Todos os protocolos reutilizam \code{AppMessage}. A Tabela~\ref{tab:envelope} apresenta os campos.
+
+\begin{table}[H]
+    \centering
+    \small
+    \begin{tabularx}{\textwidth}{@{}p{3cm}p{3cm}X@{}}
+        \toprule
+        Campo & Tipo & Função \\
+        \midrule
+        \code{type} & texto & Identifica mensagem de aplicação, mutex, eleição ou heartbeat. \\
+        \code{sender_id} & inteiro & Identifica o processo que enviou a mensagem. \\
+        \code{message_id} & texto & UUID da mensagem, usado para correlação e observabilidade. \\
+        \code{logical_time} & inteiro não negativo & Timestamp do evento lógico de envio. \\
+        \code{payload} & objeto JSON & Dados específicos, como \code{request_id}, \code{request_timestamp}, \code{election_id} ou \code{leader_id}. \\
+        \bottomrule
+    \end{tabularx}
+    \caption{Envelope comum às mensagens entre nós.}
+    \label{tab:envelope}
+\end{table}
+
+O modelo é validado por Pydantic \cite{pydantic}. Essa validação impede, por exemplo, timestamps negativos e durações da seção crítica fora do intervalo aceito.
+
+\subsection{API e observabilidade}
+
+\begin{longtable}{@{}>{\raggedright\arraybackslash}p{6.5cm}p{1.5cm}p{7.0cm}@{}}
+    \caption{Endpoints principais dos nós.}\label{tab:endpoints}\\
+    \toprule
+    Endpoint & Método & Finalidade \\
+    \midrule
+    \endfirsthead
+    \toprule
+    Endpoint & Método & Finalidade \\
+    \midrule
+    \endhead
+    \path{/health} & GET & Verifica disponibilidade e retorna o ID do nó. \\
+    \path{/state} & GET & Expõe snapshot do relógio, contadores, mutex e eleição. \\
+    \path{/events} & GET & Retorna o log local de eventos e anotações. \\
+    \path{/messages} & POST & Recebe o envelope comum e despacha pelo tipo. \\
+    \path{/commands/local-event} & POST & Gera um evento local de Lamport. \\
+    \path{/commands/send-message} & POST & Envia uma mensagem de aplicação a um peer. \\
+    \path{/commands/request-critical-section} & POST & Executa uma tentativa completa do mutex. \\
+    \path{/commands/start-election} & POST & Agenda uma eleição manual. \\
+    \bottomrule
+\end{longtable}
+
+Os registros de \code{/events} possuem \code{event_kind}. O valor \code{lamport_event} identifica os eventos centrais usados na demonstração causal; \code{annotation} identifica detalhes e transições auxiliares do protocolo. A classificação é informativa e não deve ser usada isoladamente para inferir se uma função chamou \code{tick()}; ela evita, sobretudo, tratar cada linha do log como um evento teórico independente.
+
+\subsection{Configuração temporal}
+
+\begin{table}[H]
+    \centering
+    \small
+    \begin{tabularx}{\textwidth}{@{}XrX@{}}
+        \toprule
+        Variável & Valor & Papel \\
+        \midrule
+        \code{HEARTBEAT_INTERVAL_MS} & 700 ms & Intervalo entre heartbeats do líder. \\
+        \code{LEADER_TIMEOUT_MS} & 2500 ms & Limite sem heartbeat antes de iniciar eleição. \\
+        \code{ELECTION_RESPONSE_TIMEOUT_MS} & 700 ms & Espera por resposta de processo superior. \\
+        \code{COORDINATOR_TIMEOUT_MS} & 2500 ms & Espera pelo anúncio após receber resposta. \\
+        \code{STARTUP_ELECTION_DELAY_MS} & 500 ms & Atraso inicial antes da eleição de startup. \\
+        \bottomrule
+    \end{tabularx}
+    \caption{Timeouts configurados no Docker Compose.}
+    \label{tab:timeouts}
+\end{table}
+
+Os intervalos são medidos com \code{time.monotonic()}, apropriado para diferenças de tempo porque não depende de ajustes do relógio de parede \cite{python-time}.

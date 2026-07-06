@@ -1,100 +1,193 @@
 \section{Desenvolvimento e implementação}
+\label{sec:desenvolvimento}
 
-\subsection{Base do projeto}
+\subsection{Base de execução}
 
-A primeira etapa foi estruturar o ambiente executável e reproduzível.
-O repositório passou a usar Python 3.12, FastAPI, Uvicorn e HTTPX, com organização em \code{src/}, \code{tests/}, \code{scripts/} e \code{docs/}.
-O empacotamento foi definido em \code{pyproject.toml}, e a execução local foi padronizada com Docker Compose.
+O projeto utiliza Python 3.12 e empacotamento definido em \code{pyproject.toml}. FastAPI fornece os endpoints e o ciclo de vida ASGI; Uvicorn executa as aplicações; HTTPX realiza as chamadas entre processos; Pydantic valida os contratos; Pytest e pytest-asyncio compõem a suíte de testes \cite{fastapi,uvicorn,httpx,pydantic,pytest,pytestasyncio}.
 
-Essa base permitiu separar com clareza o que é configuração, o que é implementação e o que é automação.
-Também facilitou a evolução incremental do projeto sem perder rastreabilidade.
+O \code{Dockerfile} \cite{dockerfile} produz uma imagem comum. No Compose, \code{node1} realiza o build e os demais serviços reutilizam a imagem. Cada nó recebe uma lista de peers com os endereços internos \code{http://nodeX:8000}. As portas 8001, 8002, 8003 e 8010 são apenas mapeamentos para acesso pelo host.
 
-\subsection{Modelo de mensagens e estado}
+\subsection{Estado local e sincronização entre corrotinas}
 
-O módulo \code{src/node/models.py} define os tipos de mensagens e comandos usados pelo sistema.
-O envelope comum inclui identificador do remetente, identificador da mensagem, tempo lógico e um \code{payload} flexível.
-Isso permitiu reusar a mesma infraestrutura para mensagens de aplicação, mutex e eleição.
-
-O estado de cada nó fica concentrado em memória e é gerenciado por uma classe central em \code{src/node/state.py}.
-Ali estão as responsabilidades de:
+A classe \code{NodeState} concentra o estado mutável e usa um único \code{asyncio.Lock}. A documentação de Python define \code{Lock} como uma primitiva de exclusão mútua entre tarefas assíncronas e \code{Event} como uma sinalização para tarefas em espera \cite{python-asyncio}. No projeto, o lock protege:
 
 \begin{itemize}
-    \item registrar eventos locais e recebidos;
-    \item atualizar o relógio de Lamport;
-    \item controlar estados da exclusão mútua;
-    \item administrar o estado de eleição e líder;
-    \item expor snapshots para inspeção via API.
+    \item valor do relógio e contadores de mensagens;
+    \item estado, timestamp e respostas do mutex;
+    \item líder conhecido, rodada e respostas de eleição;
+    \item histórico circular de até 500 registros.
 \end{itemize}
 
-\subsection{Correções de Lamport e do log de eventos}
+Um \code{asyncio.Event} é criado em cada pedido de mutex. Ele é sinalizado quando o conjunto de respostas atinge o número de peers. O endpoint usa \code{asyncio.wait_for()} para limitar a espera, sem implementar polling ativo \cite{python-waitfor}.
 
-A revisão recente formalizou a diferença entre evento Lamport e anotação de observabilidade.
-Os registros que avançam ou atualizam o relógio foram classificados como \code{lamport_event}; os registros que apenas detalham o mesmo acontecimento foram classificados como \code{annotation}.
+\subsection{Relógio de Lamport e log de eventos}
 
-Também ficou explícito que o timestamp da mensagem é o timestamp do evento de envio e que o recebimento atualiza o relógio antes do registro do evento correspondente.
-Essa separação evita interpretar o log de \code{/events} como uma sequência um-para-um de eventos teóricos.
+\subsubsection{Operações do relógio}
+
+O módulo \code{clock.py} mantém um contador inteiro iniciado em zero. As operações são pequenas e determinísticas:
+
+\begin{lstlisting}[language=Python,caption={Operações essenciais do relógio lógico.}]
+def tick(self) -> int:
+    self.value += 1
+    return self.value
+
+def update(self, received_time: int) -> int:
+    self.value = max(self.value, received_time) + 1
+    return self.value
+\end{lstlisting}
+
+Um envio executa \code{tick()}, cria a mensagem com o valor obtido e registra \code{SEND} com o mesmo timestamp. Um recebimento executa \code{update()} antes de registrar \code{RECEIVE}. Assim, o timestamp local do recebimento é sempre maior que o valor transportado.
+
+\subsubsection{Eventos e anotações}
+
+O histórico não é uma cópia literal da definição matemática de evento. Para separar a linha causal principal dos detalhes do protocolo, o modelo distingue:
+
+\begin{itemize}
+    \item \code{lamport_event}: evento central usado na linha causal, como \code{LOCAL}, \code{SEND}, \code{RECEIVE}, \code{MUTEX_WANTED}, \code{ENTER_CS}, \code{EXIT_CS}, \code{ELECTION_STARTED} e \code{LEADER_TIMEOUT};
+    \item \code{annotation}: detalhe ou transição auxiliar, como uma resposta adiada, uma mudança de líder, a rejeição de coordenador ou uma falha de envio.
+\end{itemize}
+
+Por exemplo, o recebimento de um pedido de mutex gera um \code{RECEIVE} e uma anotação \code{MUTEX_REQUEST_RECEIVED} com o mesmo timestamp. Isso representa um único evento de recebimento e duas visões de observabilidade, não dois eventos sucessivos do processo. A classificação é semântica, não um mecanismo de controle do relógio: a transição \code{MUTEX_HELD}, por exemplo, executa \code{tick()} e ainda assim é rotulada como \code{annotation}. Portanto, reconstruções precisas devem considerar a ação e o timestamp, e não apenas \code{event_kind}.
+
+\subsubsection{Exemplo causal}
+
+Considere o encadeamento usado no smoke test:
+
+\begin{enumerate}
+    \item \code{node1} registra um evento local;
+    \item \code{node1} envia uma mensagem a \code{node2};
+    \item \code{node2} recebe a mensagem e depois envia outra a \code{node3};
+    \item \code{node3} recebe a segunda mensagem.
+\end{enumerate}
+
+O script verifica as desigualdades:
+
+\begin{align*}
+    C(S_{1\rightarrow2}) &< C(R_{1\rightarrow2}),\\
+    C(R_{1\rightarrow2}) &< C(S_{2\rightarrow3}),\\
+    C(S_{2\rightarrow3}) &< C(R_{2\rightarrow3}).
+\end{align*}
+
+Essas relações demonstram a condição de Lamport no cenário observado. Elas não provam que qualquer par de timestamps ordenados possua relação causal.
 
 \subsection{Exclusão mútua distribuída}
 
-A exclusão mútua foi modelada com o algoritmo de Ricart-Agrawala.
-Foram adotados os estados \code{RELEASED}, \code{WANTED} e \code{HELD}, e a prioridade segue o par \code{(request_timestamp, node_id)}.
+\subsubsection{Modelagem de estados}
 
-Durante uma solicitação de seção crítica, o nó:
+A implementação representa o estado local por três valores:
+
+\begin{table}[H]
+    \centering
+    \small
+    \begin{tabularx}{\textwidth}{@{}p{2.8cm}X X@{}}
+        \toprule
+        Estado & Significado & Comportamento ao receber pedido \\
+        \midrule
+        \code{RELEASED} & Não deseja e não ocupa a seção crítica. & Responde imediatamente. \\
+        \code{WANTED} & Possui pedido local aguardando respostas. & Compara prioridades e pode adiar. \\
+        \code{HELD} & Está dentro da seção crítica. & Sempre adia a resposta. \\
+        \bottomrule
+    \end{tabularx}
+    \caption{Estados locais usados para Ricart--Agrawala.}
+    \label{tab:mutex-states}
+\end{table}
+
+Esses nomes são a modelagem adotada no projeto; a referência acadêmica é usada para as regras do algoritmo, não para afirmar que a nomenclatura seja textual no artigo original.
+
+\subsubsection{Criação e disseminação do pedido}
+
+Ao iniciar uma tentativa, o nó:
 
 \begin{enumerate}
-    \item fixa um \code{request_timestamp} para toda a tentativa;
-    \item envia \code{MUTEX_REQUEST} para os outros nós;
-    \item aguarda \code{MUTEX_REPLY} até receber todas as respostas esperadas;
-    \item entra na seção crítica;
-    \item notifica o observador \code{resource} na entrada e na saída;
-    \item libera respostas adiadas ao final.
+    \item exige estado \code{RELEASED};
+    \item incrementa o relógio e fixa esse valor em \code{request_timestamp};
+    \item gera um \code{request_id} único;
+    \item muda para \code{WANTED};
+    \item limpa respostas antigas;
+    \item envia \code{MUTEX_REQUEST} a todos os peers.
 \end{enumerate}
 
-A revisão também renomeou o timeout que encerra uma tentativa sem sucesso para \code{MUTEX_ABORTED}.
-Isso separa saída normal, timeout e erro de transporte, evitando ambiguidades no log e nos testes.
+O \code{request_timestamp} é igual para todos os pedidos da mesma tentativa. Já o \code{logical_time} do envelope muda a cada envio, pois cada transmissão é um evento distinto. Essa separação é necessária: a prioridade pertence à tentativa, e não ao instante em que cada peer foi contatado.
 
-O observador \code{resource} foi propositalmente mantido fora da decisão de acesso.
-Ele só registra \code{ENTER} e \code{EXIT} e conta sobreposições, o que ajuda a verificar se a exclusão mútua está funcionando sem centralizar o controle.
+\subsubsection{Regra de prioridade}
+
+A função pura de prioridade usa comparação lexicográfica:
+
+\begin{equation}
+    local\_priority \Leftrightarrow
+    (t_{local}, id_{local}) < (t_{remoto}, id_{remoto}).
+\end{equation}
+
+Se o estado local for \code{WANTED} e o pedido local tiver prioridade, a resposta remota é armazenada em \code{deferred_replies}. Caso contrário, \code{MUTEX_REPLY} é enviada imediatamente. Conjuntos impedem que respostas duplicadas sejam contadas mais de uma vez, e o \code{request_id} impede que uma resposta antiga libere uma tentativa nova.
+
+\subsubsection{Entrada, saída e abort}
+
+A passagem para \code{HELD} só ocorre depois de receber exatamente uma resposta de cada peer. A entrada e a saída da seção crítica são eventos locais separados. Após a saída, o estado volta a \code{RELEASED} e todas as respostas adiadas são enviadas.
+
+Se a espera ultrapassa o timeout, a tentativa é encerrada por \code{MUTEX_ABORTED}. Essa ação incrementa o relógio, limpa o estado local e devolve as respostas adiadas. O procedimento melhora a controlabilidade dos testes, porém não garante que todos os processos tenham visão consistente do abort nem resolve falha de participante.
+
+\subsubsection{Observador externo}
+
+Antes e depois do período simulado na seção crítica, o nó envia notificações a \code{resource}. O observador mantém um mapa de solicitações ativas. Uma nova entrada enquanto o mapa não está vazio incrementa \code{violations}. Esse mecanismo fornece evidência de ausência de sobreposição nos cenários executados, mas não faz parte da autorização e não é uma prova formal para todas as execuções possíveis.
 
 \subsection{Eleição de líder}
 
-A eleição de líder foi implementada com uma adaptação didática do Bully.
-Os nós trocam mensagens \code{ELECTION}, \code{ELECTION_OK}, \code{COORDINATOR} e \code{HEARTBEAT}.
-O maior \code{node_id} ativo deve assumir como líder.
+\subsubsection{Mensagens e fluxo}
 
-A revisão recente corrigiu a aceitação de coordenador e heartbeat para respeitar três critérios ao mesmo tempo:
+A Tabela~\ref{tab:election-messages} relaciona as mensagens com sua função.
+
+\begin{table}[H]
+    \centering
+    \small
+    \begin{tabularx}{\textwidth}{@{}p{3.5cm}X p{3.7cm}@{}}
+        \toprule
+        Tipo & Função & Origem \\
+        \midrule
+        \code{ELECTION} & Pergunta a processos de ID maior se algum está ativo. & Regra central do Bully. \\
+        \code{ELECTION_OK} & Confirma que um processo superior está ativo. & Nome local para resposta superior. \\
+        \code{COORDINATOR} & Anuncia o vencedor da eleição. & Regra central do Bully. \\
+        \code{HEARTBEAT} & Renova a presença do líder conhecido. & Adaptação do projeto. \\
+        \bottomrule
+    \end{tabularx}
+    \caption{Mensagens do subsistema de eleição.}
+    \label{tab:election-messages}
+\end{table}
+
+Ao iniciar uma rodada, o nó gera um UUID em \code{election_id}, incrementa o relógio e seleciona apenas peers de ID maior. Se a lista estiver vazia, torna-se líder e anuncia o resultado. Se nenhum superior responder dentro de 700 ms, o iniciador também se declara líder. Quando recebe ao menos uma resposta, espera até 2500 ms por \code{COORDINATOR}; na ausência do anúncio, registra \code{ELECTION_ROUND_TIMED_OUT} e inicia uma nova rodada.
+
+\subsubsection{Detecção de falha e recuperação}
+
+O líder envia heartbeat a cada 700 ms. Seguidores usam \code{time.monotonic()} para medir o tempo desde a última mensagem aceita. Após 2500 ms, removem o líder, registram \code{LEADER_TIMEOUT} e agendam uma eleição. No startup, cada nó também agenda uma eleição após 500 ms; isso permite que um processo superior recuperado volte a disputar a liderança.
+
+\subsubsection{Aceitação de líder}
+
+A aceitação de um coordenador não depende apenas da existência de uma eleição em andamento; ela respeita a prioridade dos identificadores. A regra implementada é:
+
+\begin{equation}
+\begin{split}
+    accept(announced) \Leftrightarrow {} & announced \geq node\_id \\
+    & \land (current = \varnothing \lor announced \geq current).
+\end{split}
+\label{eq:accept-leader}
+\end{equation}
+
+A primeira condição impede que um processo ativo aceite como líder alguém inferior a si próprio. A segunda impede rebaixar um líder já conhecido. O heartbeat exige ainda que \code{sender_id == leader_id}.
+
+Se um coordenador ou heartbeat coerente, porém inferior ao nó local, é rejeitado, a camada de controle agenda uma eleição. O agendamento usa uma task única protegida por lock, evitando a criação simultânea de várias tarefas locais. Mensagens malformadas, como \code{leader_id} diferente do remetente, são rejeitadas sem serem tratadas como evidência de uma liderança inferior válida.
+
+\subsubsection{Limites do identificador de eleição}
+
+O \code{election_id} é associado à rodada local do iniciador e permite ignorar \code{ELECTION_OK} duplicado, atrasado ou referente a outra tentativa. Ele não é um número de época global nem identifica todas as eleições concorrentes do sistema. A convergência depende da regra de prioridade, do anúncio do coordenador e dos timeouts.
+
+\subsection{Decisões de implementação e limitações}
+
+As decisões centrais foram manter o estado em memória, evitar qualquer coordenador para o mutex, reutilizar um envelope comum e realizar a falha do líder pela parada real do contêiner. Como consequência:
 
 \begin{itemize}
-    \item o identificador do próprio nó;
-    \item o líder atualmente conhecido;
-    \item a prioridade anunciada na mensagem.
-\end{itemize}
-
-Com isso, um líder inferior não substitui um líder superior e um anúncio coerente de nó inferior pode provocar nova eleição quando apropriado.
-O identificador \code{election_id} continua sendo uma adaptação local para ignorar respostas antigas ou duplicadas.
-
-\subsection{Ferramentas e dependências}
-
-A revisão também tornou \code{pydantic} uma dependência direta do projeto.
-Isso evita depender apenas da instalação transitiva trazida por FastAPI e deixa a configuração mais explícita.
-
-Outro ponto de rastreabilidade foi a política de resultados.
-Os artefatos em \path{docs/results/} passaram a ser versionáveis.
-Essa decisão alinha o README com os dados efetivamente produzidos.
-
-\subsection{Marcos executados}
-
-Em termos práticos, o trabalho passou pelos seguintes marcos:
-
-\begin{itemize}
-    \item configuração do runtime e da orquestração local;
-    \item implementação dos nós distribuídos com API HTTP;
-    \item adição do relógio de Lamport;
-    \item adição da exclusão mútua com observador externo;
-    \item adição da eleição de líder e do heartbeat;
-    \item revisão da aceitação de coordenador e heartbeat;
-    \item classificação explícita entre evento e anotação;
-    \item criação dos smoke tests e da demonstração automatizada;
-    \item criação dos experimentos e captura dos resultados;
-    \item fechamento com documentação de decisão, rastreabilidade e referências.
+    \item reiniciar um nó perde seu histórico e estado local;
+    \item falhas durante uma rodada de mutex podem interromper o progresso;
+    \item os timeouts foram calibrados para a execução local;
+    \item uma partição pode criar visões incompatíveis de liderança;
+    \item o serviço \code{resource} pode detectar sobreposição observada, mas não impedir uma violação;
+    \item a criação de um novo \code{httpx.AsyncClient} por chamada é simples, porém não aproveita pooling de longo prazo sugerido pela documentação do HTTPX \cite{httpx}.
 \end{itemize}

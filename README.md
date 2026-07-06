@@ -1,22 +1,22 @@
 # MC714 - Trabalho 2
 
-ImplementaÃ§Ã£o academica local de sistemas distribuidos com comunicaÃ§Ã£o HTTP/JSON real entre contÃªineres.
+Implementação acadêmica local de sistemas distribuídos com comunicação HTTP/JSON real entre contêineres.
 
-## VisÃ£o geral
+## Visão geral
 
-O projeto preserva a arquitetura com trÃªs nÃ³s (`node1`, `node2`, `node3`) e um observador externo (`resource`). O estado permanece local e em memÃ³ria, a comunicaÃ§Ã£o usa FastAPI, Uvicorn e HTTPX, e a orquestraÃ§Ã£o ocorre por Docker Compose.
+O projeto adota uma arquitetura com três nós (`node1`, `node2`, `node3`) e um observador externo (`resource`). O estado permanece local e em memória, a comunicação usa FastAPI, Uvicorn e HTTPX, e a orquestração ocorre por Docker Compose.
 
-NÃ£o hÃ¡ consenso, Paxos, Raft, replicaÃ§Ã£o, persistÃªncia, autenticaÃ§Ã£o, frontend, dashboard, Kubernetes, banco de dados, tolerÃ¢ncia a partiÃ§Ãµes ou coordenaÃ§Ã£o por arquivos/volumes.
+Não há consenso, Paxos, Raft, replicação, persistência, autenticação, frontend, dashboard, Kubernetes, banco de dados, tolerância a partições ou coordenação por arquivos/volumes.
 
 ## Arquitetura
 
-- `node1`, `node2` e `node3` executam o mesmo cÃ³digo em contÃªineres separados.
-- `resource` e um observador externo, nÃ£o um coordenador.
-- A comunicaÃ§Ã£o entre nÃ³s usa HTTP/JSON via FastAPI, Uvicorn e HTTPX.
-- Cada nÃ³ possui estado local apenas em memÃ³ria.
+- `node1`, `node2` e `node3` executam o mesmo código em contêineres separados.
+- `resource` é um observador externo, não um coordenador.
+- A comunicação entre nós usa HTTP/JSON via FastAPI, Uvicorn e HTTPX.
+- Cada nó possui estado local apenas em memória.
 - Docker Compose orquestra a pilha local.
 
-Mapa rÃ¡pido:
+Mapa rápido:
 
 ```text
 node1 <-> node2 <-> node3
@@ -30,36 +30,36 @@ node1 <-> node2 <-> node3
 
 ### Lamport
 
-O projeto trata como eventos Lamport os registros que avanÃ§am ou atualizam o relogio logico:
+O projeto trata como eventos Lamport os registros que avançam ou atualizam o relógio lógico:
 
 1. evento local: `clock = clock + 1`
 2. envio: `clock = clock + 1` e o valor vai em `logical_time`
 3. recebimento: `clock = max(clock, received) + 1`
 
-O endpoint `/events` e um log de observabilidade. Ele pode conter anotacoes do mesmo acontecimento, e nÃ£o deve ser lido como uma lista estritamente um-para-um de eventos teoricos.
+O endpoint `/events` é um log de observabilidade. Ele pode conter anotações do mesmo acontecimento e não deve ser lido como uma lista estritamente um-para-um de eventos teóricos.
 
-A causalidade demonstrada no projeto vale para os cenarios executados. Um timestamp menor nÃ£o prova causalidade.
+A causalidade demonstrada no projeto vale para os cenários executados. Um timestamp menor não prova causalidade.
 
 ### Ricart-Agrawala
 
-- Os estados `RELEASED`, `WANTED` e `HELD` sao a modelagem local usada pelo projeto.
+- Os estados `RELEASED`, `WANTED` e `HELD` são a modelagem local usada pelo projeto.
 - A prioridade segue o par `(request_timestamp, node_id)`.
-- As mensagens centrais sao `MUTEX_REQUEST` e `MUTEX_REPLY`.
-- O custo esperado sem falhas e `2 x (N - 1)` mensagens do protocolo, contando apenas `REQUEST` e `REPLY`.
-- O timeout existe para limpeza local e teste, nÃ£o para oferecer tolerÃ¢ncia a falhas.
-- O observador `resource` nÃ£o concede acesso; ele apenas registra entrada, saÃ­da e sobreposicao.
+- As mensagens centrais são `MUTEX_REQUEST` e `MUTEX_REPLY`.
+- O custo esperado sem falhas é `2 x (N - 1)` mensagens do protocolo, contando apenas `REQUEST` e `REPLY`.
+- O timeout existe para limpeza local e teste, não para oferecer tolerância a falhas.
+- O observador `resource` não concede acesso; ele apenas registra entrada, saída e sobreposição.
 
 ### Bully
 
-- As mensagens centrais do protocolo sao `ELECTION`, `ELECTION_OK` e `COORDINATOR`.
-- `HEARTBEAT` e `election_id` sao adaptacoes do projeto.
-- O maior `node_id` ativo vira lider.
-- O lider nÃ£o autoriza o mutex.
-- A eleiÃ§Ã£o depende de atrasos limitados e timeouts coerentes com a rede local.
-- NÃ£o ha tolerÃ¢ncia a partiÃ§Ãµes.
-- Se os timeouts forem incompatÃ­veis com a rede, o comportamento pode ficar inadequado.
+- As mensagens centrais do protocolo são `ELECTION`, `ELECTION_OK` e `COORDINATOR`.
+- `HEARTBEAT` e `election_id` são adaptações do projeto.
+- O maior `node_id` ativo se torna líder.
+- O líder não autoriza o mutex.
+- A eleição depende de atrasos limitados e timeouts coerentes com a rede local.
+- Não há tolerância a partições.
+- Se os timeouts forem incompatíveis com a rede, o comportamento pode ficar inadequado.
 
-ConfiguraÃ§Ã£o usada pela pilha:
+Configuração usada pela pilha:
 
 ```text
 HEARTBEAT_INTERVAL_MS=700
@@ -88,14 +88,14 @@ python -m venv .venv
 docker compose up --build -d
 ```
 
-Servicos expostos no host:
+Serviços expostos no host:
 
 - `node1`: `http://localhost:8001`
 - `node2`: `http://localhost:8002`
 - `node3`: `http://localhost:8003`
 - `resource`: `http://localhost:8010`
 
-Entre contÃªineres, use nomes do Compose, por exemplo `http://node2:8000`.
+Entre contêineres, use nomes do Compose, por exemplo `http://node2:8000`.
 
 ## Endpoints principais
 
@@ -130,7 +130,7 @@ curl -X POST http://localhost:8001/commands/request-critical-section `
   -d "{\"duration_ms\":300}"
 ```
 
-Iniciar eleiÃ§Ã£o manual:
+Iniciar eleição manual:
 
 ```powershell
 curl -X POST http://localhost:8001/commands/start-election `
@@ -147,7 +147,7 @@ python scripts/smoke_mutex.py
 python scripts/smoke_election.py
 ```
 
-Uso rÃ¡pido para demonstraÃ§Ã£o:
+Uso rápido para demonstração:
 
 ```powershell
 python scripts/demo.py
@@ -159,30 +159,30 @@ python scripts/demo.py
 python scripts/run_experiments.py
 ```
 
-Os dados brutos ficam em `docs/results/raw-results.json` e o resumo em `docs/results/experiment-summary.csv`. O README de resultados em `docs/results/README.md` descreve a execucao mais recente gerada pelo script.
+Os dados brutos ficam em `docs/results/raw-results.json` e o resumo em `docs/results/experiment-summary.csv`. O README de resultados em `docs/results/README.md` descreve a execução versionada gerada pelo script.
 
 ## Resultados coletados
 
-Resumo da ultima execucao versionada dos experimentos:
+Resumo da execução versionada dos experimentos:
 
 | Experimento | Medida | Resultado |
 | --- | --- | --- |
-| Lamport | violacoes | 0 em 5 repeticoes |
-| Mutex individual | mensagens do protocolo | 4 em 5 repeticoes |
-| Mutex individual | espera media | 71.692 ms |
-| Mutex concorrente | sobreposicoes | 0 em 15 pedidos |
-| Mutex concorrente | respostas adiadas medias | 1 |
-| EleiÃ§Ã£o | deteccao de parada do lider | 4293.6 ms media |
-| EleiÃ§Ã£o | recuperacao do lider | 662.6 ms media |
-| EleiÃ§Ã£o | divergencia apos estabilizacao | 0 |
+| Lamport | violações | 0 em 5 repetições |
+| Mutex individual | mensagens do protocolo | 4 em 5 repetições |
+| Mutex individual | espera média | 71,692 ms |
+| Mutex concorrente | sobreposições | 0 em 15 pedidos |
+| Mutex concorrente | respostas adiadas médias | 1 |
+| Eleição | detecção de parada do líder | 4293,6 ms em média |
+| Eleição | recuperação do líder | 662,6 ms em média |
+| Eleição | divergência após estabilização | 0 |
 
-## Logs e visualizacao
+## Logs e visualização
 
 ```powershell
 docker compose logs --no-color
 ```
 
-Exemplo de saÃ­da:
+Exemplo de saída:
 
 ```text
 wall=... | L=30 | node=1 | LEADER_TIMEOUT | leader=3
@@ -202,30 +202,30 @@ docker compose down
 ## Estrutura
 
 ```text
-src/node/                     No HTTP com Lamport, mutex e eleiÃ§Ã£o
-src/resource/                 Observador da seÃ§Ã£o critica
-scripts/                      Smoke tests, demo e experimentos
-tests/unit/                   Testes unitarios
-docs/results/                 Resultados gerados por `scripts/run_experiments.py`
-docs/references.md            Rastreabilidade academica
+src/node/                       Nó HTTP com Lamport, mutex e eleição
+src/resource/                   Observador da seção crítica
+scripts/                        Smoke tests, demo e experimentos
+tests/unit/                     Testes unitários
+docs/results/                   Resultados gerados por `scripts/run_experiments.py`
+docs/references.md              Rastreabilidade acadêmica
 docs/algorithm-traceability.md  Matriz de rastreabilidade dos algoritmos
-docs/decision-log.md          Decisoes relevantes
-Dockerfile                    Imagem comum
-docker-compose.yml            Pilha local com 4 servicos
-pyproject.toml                Dependencias e config de testes
+docs/decision-log.md            Decisões relevantes
+Dockerfile                      Imagem comum
+docker-compose.yml              Pilha local com 4 serviços
+pyproject.toml                  Dependências e configuração de testes
 ```
 
-## Limitacoes
+## Limitações
 
 - Ricart-Agrawala continua dependente de participantes ativos durante a rodada.
-- O timeout do mutex limpa estado local, mas nÃ£o prova tolerÃ¢ncia a falhas.
+- O timeout do mutex limpa estado local, mas não prova tolerância a falhas.
 - Bully assume falha por parada real de processo e atrasos locais limitados.
-- Particoes de rede nÃ£o sao tratadas.
-- Mensagens inferiores sao rejeitadas mesmo se houver eleiÃ§Ã£o em andamento.
-- O lider eleito nÃ£o coordena o mutex.
-- Eventos e anotacoes ficam apenas em memÃ³ria local.
-- O observador `resource` nÃ£o participa da seguranÃ§a.
+- Partições de rede não são tratadas.
+- Mensagens inferiores são rejeitadas mesmo se houver eleição em andamento.
+- O líder eleito não coordena o mutex.
+- Eventos e anotações ficam apenas em memória local.
+- O observador `resource` não participa da segurança.
 
-## Referencias
+## Referências
 
-Veja `docs/references.md` para a lista de fontes academicas, documentacao oficial e declaracao de autoria.
+Veja `docs/references.md` para a lista de fontes acadêmicas, documentação oficial e declaração de autoria.

@@ -1,45 +1,156 @@
 \section{Validação, testes e experimentos}
+\label{sec:validacao}
 
-A validação foi organizada em três camadas.
-A primeira camada é a suíte de testes unitários em \code{tests/unit/}, cobrindo relógio, mutex, eleição, modelos e estado.
-A segunda camada é a bateria de smoke tests em \code{scripts/}, usada para exercitar o sistema real em execução distribuída.
-A terceira camada é a coleta de experimentos reproduzíveis, com saída estruturada para análise posterior.
+\subsection{Estratégia de validação}
 
-Os scripts principais são:
+A validação foi organizada em três níveis complementares:
 
-\begin{itemize}
-    \item \code{scripts/smoke_http.py};
-    \item \code{scripts/smoke_lamport.py};
-    \item \code{scripts/smoke_mutex.py};
-    \item \code{scripts/smoke_election.py};
-    \item \code{scripts/demo.py};
-    \item \code{scripts/run_experiments.py}.
-\end{itemize}
+\begin{enumerate}
+    \item \textbf{testes unitários}: verificam funções puras e transições de estado sem depender da rede;
+    \item \textbf{smoke tests distribuídos}: exercitam os serviços reais em contêineres, usando apenas APIs públicas e Docker Compose;
+    \item \textbf{experimentos repetidos}: executam cenários cinco vezes, armazenam dados brutos e calculam estatísticas descritivas.
+\end{enumerate}
 
-\subsection{Resultados locais validados}
+Essa separação permite localizar erros. Um teste de prioridade pode falhar sem iniciar contêineres; um problema de transporte aparece nos smoke tests; variações temporais são observadas nos experimentos.
 
-Na revisão local, a suíte de testes executada com a virtualenv passou com 62 testes.
-A checagem de importação também confirmou o uso direto de \code{pydantic} no ambiente do projeto.
+\subsection{Testes unitários}
 
-Ao mesmo tempo, o Python do sistema ainda não possuía as dependências do projeto, e o Docker Engine não estava disponível no host no momento da revisão.
-Por isso, os smoke tests distribuídos e a regeneração dos experimentos não puderam ser executados novamente nesta passagem.
-Os resultados versionados abaixo permanecem como artefatos históricos do repositório:
+A suíte de testes unitários, executada na virtualenv do projeto, conclui com \textbf{62 testes aprovados}. Os testes cobrem:
 
 \begin{itemize}
-    \item \path{docs/results/README.md};
-    \item \path{docs/results/raw-results.json};
-    \item \path{docs/results/experiment-summary.csv}.
+    \item incremento e atualização do relógio;
+    \item validação de modelos e configuração;
+    \item prioridade e adiamento em Ricart--Agrawala;
+    \item transições \code{RELEASED}, \code{WANTED} e \code{HELD};
+    \item rejeição de respostas duplicadas e antigas;
+    \item abort do mutex e liberação de respostas adiadas;
+    \item seleção de peers superiores no Bully;
+    \item aceitação e rejeição de coordenador e heartbeat;
+    \item preservação de uma eleição ativa após mensagem inferior;
+    \item classificação entre \code{lamport_event} e \code{annotation};
+    \item monotonicidade dos timestamps no histórico local.
 \end{itemize}
 
-\subsection{Documentação de apoio}
+Uma matriz parametrizada verifica casos essenciais da regra de coordenador, incluindo nó local superior ao anúncio, líder atual superior ao anúncio e aceitação de um coordenador maior durante eleição ativa. Testes adicionais confirmam que mensagens de eleição não alteram o estado do mutex.
 
-A documentação do projeto foi mantida de forma complementar ao código:
+\subsection{Smoke tests}
+
+Os scripts exercitam a pilha como uma aplicação distribuída:
+
+\begin{table}[H]
+    \centering
+    \small
+    \begin{tabularx}{\textwidth}{@{}>{\raggedright\arraybackslash}p{5.1cm}X@{}}
+        \toprule
+        Script & Cenário verificado \\
+        \midrule
+        \path{scripts/smoke_http.py} & Envio HTTP/JSON de \code{node1} para \code{node2}, contadores e evento de recebimento. \\
+        \path{scripts/smoke_lamport.py} & Evento local e cadeia causal \code{node1 -> node2 -> node3}. \\
+        \path{scripts/smoke_mutex.py} & Pedido individual, três pedidos concorrentes, quatro mensagens no caso individual e ausência de sobreposição observada. \\
+        \path{scripts/smoke_election.py} & Líder inicial 3, parada real do \code{node3}, eleição do 2, recuperação do 3 e nova convergência. \\
+        \path{scripts/demo.py} & Encadeamento dos quatro smoke tests em uma única execução. \\
+        \bottomrule
+    \end{tabularx}
+    \caption{Cenários cobertos pelos smoke tests.}
+    \label{tab:smokes}
+\end{table}
+
+Os scripts esperam explicitamente pela saúde dos serviços e fazem polling apenas para observar estados assíncronos. Eles não modificam diretamente variáveis internas dos nós.
+
+\subsection{Metodologia experimental}
+
+O script \code{run_experiments.py} gera três grupos de experimentos:
 
 \begin{itemize}
-    \item \code{README.md} resume a arquitetura, os comandos e os resultados;
-    \item \code{docs/decision-log.md} registra as decisões de projeto;
-    \item \code{docs/algorithm-traceability.md} liga teoria, código e testes;
-    \item \code{docs/references.md} consolida as referências acadêmicas e técnicas.
+    \item cinco repetições da cadeia causal de Lamport;
+    \item cinco pedidos individuais e cinco rodadas com três pedidos concorrentes de mutex;
+    \item cinco ciclos completos de eleição, parada do líder e recuperação.
 \end{itemize}
 
-Isso reduz ambiguidade, facilita auditoria e ajuda a reconstituir o raciocínio usado em cada parte da implementação.
+Os arquivos versionados são:
+
+\begin{itemize}
+    \item \projectpath{docs/results/raw-results.json}, com eventos e estados detalhados;
+    \item \projectpath{docs/results/experiment-summary.csv}, com estatísticas;
+    \item \projectpath{docs/results/README.md}, com ambiente e comandos.
+\end{itemize}
+
+Os experimentos versionados foram executados em \textbf{4 de julho de 2026 (UTC)}. As médias, medianas, mínimos e máximos foram calculados pelo próprio script a partir da pilha em execução.
+
+\subsection{Resultados experimentais versionados}
+
+\begin{table}[H]
+    \centering
+    \scriptsize
+    \begin{tabularx}{\textwidth}{@{}p{2.7cm}p{3.1cm}r r r r r@{}}
+        \toprule
+        Experimento & Métrica & $n$ & Mín. & Máx. & Média & Mediana \\
+        \midrule
+        Lamport & violações & 5 & 0 & 0 & 0 & 0 \\
+        Mutex individual & mensagens & 5 & 4 & 4 & 4 & 4 \\
+        Mutex individual & espera (ms) & 5 & 51,497 & 107,261 & 71,692 & 69,893 \\
+        Mutex individual & duração observada (ms) & 5 & 162 & 166 & 164,6 & 165 \\
+        Mutex concorrente & espera (ms) & 15 & 92,391 & 656,909 & 368,799 & 365,407 \\
+        Mutex concorrente & duração observada (ms) & 15 & 213 & 218 & 215,267 & 215 \\
+        Mutex concorrente & respostas adiadas & 15 & 0 & 2 & 1 & 1 \\
+        Eleição & detecção/convergência após parada (ms) & 5 & 3890 & 4906 & 4293,6 & 4391 \\
+        Eleição & recuperação do líder 3 (ms) & 5 & 578 & 844 & 662,6 & 625 \\
+        Eleição & ciclo total (ms) & 5 & 4531 & 5624 & 4999,8 & 5000 \\
+        \bottomrule
+    \end{tabularx}
+    \caption{Resumo da execução experimental versionada.}
+    \label{tab:results}
+\end{table}
+
+\subsection{Análise dos resultados}
+
+\subsubsection{Lamport}
+
+As cinco repetições não apresentaram violação das relações causais verificadas. O resultado confirma que, nos cenários executados, o timestamp de envio foi menor que o de recebimento e que o envio posterior de \code{node2} ocorreu depois do recebimento anterior. A métrica não verifica todos os pares de eventos nem constitui prova completa do sistema.
+
+\subsubsection{Exclusão mútua}
+
+Todos os pedidos individuais usaram exatamente quatro mensagens, em acordo com a Equação~\ref{eq:ra-messages} para $N=3$. A espera média foi de aproximadamente 71,7 ms, enquanto o período observado pelo recurso ficou próximo dos 150 ms solicitados, acrescido do custo de requisições e agendamento.
+
+Nos pedidos concorrentes, não houve sobreposição em 15 entradas. A espera média aumentou para 368,8 ms porque os processos foram serializados e respostas precisaram ser adiadas. A média de uma resposta adiada por solicitação é compatível com a existência de disputa, mas depende da ordem concreta de chegada das mensagens.
+
+\subsubsection{Eleição}
+
+Após parar \code{node3}, a convergência média para \code{node2} foi de 4,294 s. Esse tempo é superior ao \code{LEADER_TIMEOUT_MS} isolado porque inclui polling, detecção, mensagens de eleição e estabilização observada por todos os nós restantes. A recuperação de \code{node3} foi mais rápida, com média de 662,6 ms, porque a eleição de startup é agendada 500 ms após o reinício e o nó recuperado não possui peer superior.
+
+Em todas as repetições, os nós ativos convergiram para o mesmo líder ao final. O resultado não cobre partições, perda arbitrária de mensagens ou atrasos superiores aos timeouts.
+
+\subsection{Reprodutibilidade}
+
+A sequência recomendada é:
+
+\begin{lstlisting}[language=bash,caption={Comandos de validação e reprodução.}]
+python -m venv .venv
+.venv/Scripts/python -m pip install -e ".[test]"
+.venv/Scripts/python -m pytest -q
+
+docker compose up --build -d
+python scripts/smoke_http.py
+python scripts/smoke_lamport.py
+python scripts/smoke_mutex.py
+python scripts/smoke_election.py
+python scripts/run_experiments.py
+docker compose down
+\end{lstlisting}
+
+Em Linux, o executável da virtualenv normalmente fica em \code{.venv/bin/python}. O script de experimentos executa \code{docker compose down} no bloco de limpeza para reduzir o risco de deixar a pilha ativa após falha.
+
+\subsection{Ameaças à validade}
+
+As principais ameaças à validade são:
+
+\begin{itemize}
+    \item apenas três processos e execução na mesma máquina;
+    \item amostra pequena, com cinco repetições por grupo;
+    \item medição por relógio de parede em parte das métricas de duração;
+    \item contêineres e rede Docker com baixa latência em relação a uma rede real;
+    \item observação de segurança por um serviço externo, e não verificação formal;
+    \item ausência de injeção sistemática de perda, duplicação, reordenação e partição.
+\end{itemize}
+
+A documentação auxiliar em \projectpath{docs/algorithm-traceability.md}, \projectpath{docs/decision-log.md} e \projectpath{docs/references.md} complementa esta análise ao relacionar regras, funções, testes e decisões.

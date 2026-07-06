@@ -5,6 +5,7 @@
 \usepackage[brazilian]{babel}
 \usepackage{indentfirst}
 \usepackage{lmodern}
+\usepackage{microtype}
 \usepackage{geometry}
 \usepackage{array}
 \usepackage{booktabs}
@@ -12,34 +13,89 @@
 \usepackage{longtable}
 \usepackage{enumitem}
 \usepackage{setspace}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{graphicx}
+\usepackage{float}
+\usepackage{caption}
+\usepackage{tikz}
+\usepackage{listings}
+\usepackage{xurl}
 \usepackage{hyperref}
 \usepackage{xcolor}
+\usepackage{fancyhdr}
+
+\usetikzlibrary{arrows.meta,positioning,shapes.geometric,fit,calc}
 
 \geometry{left=3cm,right=2cm,top=3cm,bottom=2cm}
+\setlength{\headheight}{15pt}
 \setlength{\parindent}{1.25cm}
 \setlength{\parskip}{0pt}
 \onehalfspacing
-\setlist[itemize]{leftmargin=1.3cm}
+\setlist[itemize]{leftmargin=1.3cm,itemsep=0.15em,topsep=0.35em}
+\setlist[enumerate]{leftmargin=1.3cm,itemsep=0.15em,topsep=0.35em}
 \newcommand{\code}[1]{\texttt{\detokenize{#1}}}
+\newcommand{\projectpath}[1]{\path{#1}}
+\newcommand{\yes}{\textbf{sim}}
+\newcommand{\no}{\textbf{não}}
+
+\definecolor{codebg}{RGB}{246,248,250}
+\definecolor{codeframe}{RGB}{210,215,220}
+\definecolor{darkblue}{RGB}{25,66,120}
+\definecolor{darkgreen}{RGB}{25,105,75}
+\definecolor{darkred}{RGB}{145,45,45}
+
+\lstdefinestyle{projectcode}{
+    basicstyle=\ttfamily\small,
+    backgroundcolor=\color{codebg},
+    frame=single,
+    rulecolor=\color{codeframe},
+    breaklines=true,
+    columns=fullflexible,
+    keepspaces=true,
+    showstringspaces=false,
+    xleftmargin=0.5em,
+    xrightmargin=0.5em,
+    aboveskip=0.7em,
+    belowskip=0.7em
+}
+\lstset{style=projectcode}
 
 \hypersetup{
     colorlinks=true,
-    linkcolor=blue!60!black,
-    urlcolor=blue!60!black,
+    linkcolor=darkblue,
+    citecolor=darkgreen,
+    urlcolor=darkblue,
     pdftitle={Relatório técnico - MC714 - Trabalho 2},
+    pdfauthor={José Eduardo Santos Rabelo; Raphael Salles Vitor de Souza},
+    pdfsubject={Relógios de Lamport, Ricart-Agrawala e algoritmo Bully},
 }
 
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{MC714 - Sistemas Distribuídos}
+\fancyhead[R]{Trabalho 2}
+\fancyfoot[C]{\thepage}
+\renewcommand{\headrulewidth}{0.4pt}
+
 \begin{document}
+\pagenumbering{gobble}
+\hypersetup{pageanchor=false}
 
 \begin{titlepage}
     \centering
-    \vspace*{2cm}
+    \vspace*{1.7cm}
+
+    {\large \textbf{Universidade Estadual de Campinas}\par}
+    \vspace{0.2cm}
+    {\large Instituto de Computação\par}
+    \vspace{1.3cm}
 
     {\large \textbf{MC714 - Sistemas Distribuídos}\par}
-    \vspace{1cm}
-    {\Large \textbf{Relatório técnico e de auditoria do projeto}\par}
     \vspace{0.8cm}
-    {\large Implementação de sistemas distribuídos com HTTP/JSON entre contêineres\par}
+    {\LARGE \textbf{Relatório técnico do Trabalho 2}\par}
+    \vspace{0.6cm}
+    {\Large Implementação de relógios lógicos, exclusão mútua e eleição de líder com HTTP/JSON entre contêineres\par}
 
     \vfill
 
@@ -47,18 +103,27 @@
         Autores: & José Eduardo Santos Rabelo (RA 260551) \\
                  & Raphael Salles Vitor de Souza (RA 223641) \\
         Professor: & Luiz Fernando Bittencourt \\
-        Unidade: & IC - Instituto de Computação da Unicamp, Campinas \\
-        Semestre: & 1º semestre de 2026 \\
         Disciplina: & MC714 - Sistemas Distribuídos \\
-        Projeto: & node1, node2, node3 e resource \\
+        Semestre: & 1º semestre de 2026 \\
+        Repositório: & \code{RaphaelSVSouza/MC714-Trabalho-2} \\
     \end{tabular}
 
     \vfill
-    {\small Documento preparado em português claro, com foco no que foi implementado, corrigido e validado localmente.\par}
+    {Campinas, 2026\par}
 \end{titlepage}
+\clearpage
+\hypersetup{pageanchor=true}
+\pagenumbering{roman}
+\section*{Resumo}
+Este relatório descreve a implementação de um sistema distribuído didático composto por três nós independentes e um observador externo, todos executados em contêineres e comunicando-se por HTTP/JSON. O projeto reúne três mecanismos clássicos: relógios lógicos de Lamport, exclusão mútua distribuída baseada em Ricart--Agrawala e eleição de líder baseada no algoritmo Bully. O texto apresenta a arquitetura, o modelo de mensagens e estado, as adaptações necessárias ao transporte HTTP, as invariantes implementadas, os testes unitários, os smoke tests e os experimentos versionados. Também distingue eventos lógicos de anotações de observabilidade e registra as limitações do modelo, como participantes fixos, ausência de tolerância a partições e dependência de timeouts compatíveis com a rede local.
+
+\noindent\textbf{Palavras-chave:} sistemas distribuídos; relógio lógico; exclusão mútua; eleição de líder; HTTP; Docker.
 
 \tableofcontents
-\newpage
+\listoffigures
+\listoftables
+\clearpage
+\pagenumbering{arabic}
 
 \input{sections/01-introducao}
 \input{sections/02-objetivos}
@@ -66,6 +131,7 @@
 \input{sections/04-desenvolvimento}
 \input{sections/05-validacao}
 \input{sections/06-conclusao}
+\input{sections/07-uso-de-ia}
 \input{sections/referencias}
 
 \end{document}

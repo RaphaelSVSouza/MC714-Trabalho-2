@@ -1,21 +1,104 @@
-\section{Objetivos e escopo}
+\section{Objetivos, requisitos e fundamentação}
+\label{sec:objetivos}
 
-O objetivo geral foi manter um sistema distribuído simples, mas suficientemente completo para demonstrar comportamento real entre processos independentes executando em contêineres separados.
+\subsection{Objetivo geral}
 
-Os objetivos específicos foram:
+O objetivo geral é construir um sistema distribuído pequeno, reproduzível e suficientemente completo para demonstrar comunicação entre processos, ordenação lógica de eventos, exclusão mútua distribuída e eleição de coordenador. A implementação deve permanecer compreensível e inspecionável, privilegiando a correspondência entre teoria, código e testes.
+
+\subsection{Requisitos funcionais}
+
+Os requisitos funcionais consolidados no projeto são:
 
 \begin{itemize}
-    \item executar três nós idênticos em processos distintos;
-    \item trocar mensagens entre os nós usando HTTP/JSON;
-    \item manter estado local em memória, sem banco de dados ou arquivo compartilhado;
-    \item implementar e validar o relógio lógico de Lamport;
-    \item implementar e validar a exclusão mútua distribuída com Ricart-Agrawala;
-    \item implementar e validar a eleição de líder com Bully;
-    \item registrar a seção crítica em um observador externo chamado \code{resource};
-    \item criar testes unitários, smoke tests e experimentos reproduzíveis;
-    \item documentar decisões, limitações e rastreabilidade entre teoria e código.
+    \item executar três nós a partir do mesmo código, diferenciados por configuração;
+    \item permitir mensagens de aplicação entre quaisquer dois nós;
+    \item manter um relógio lógico independente em cada nó;
+    \item solicitar e liberar uma seção crítica sem um servidor central de autorização;
+    \item eleger o maior identificador ativo como líder;
+    \item detectar a ausência do líder por heartbeat e timeout;
+    \item expor estado e histórico local por API;
+    \item observar entradas e saídas da seção crítica em um serviço externo;
+    \item automatizar cenários de validação e coleta de métricas.
 \end{itemize}
 
-O escopo permaneceu intencionalmente restrito.
-O projeto não inclui consenso, replicação, persistência, autenticação, frontend, dashboard, Kubernetes, banco de dados ou tolerância a partições.
-Essas escolhas mantiveram o trabalho alinhado ao enunciado e preservaram a comparabilidade com a teoria utilizada.
+\subsection{Requisitos de qualidade}
+
+A solução também busca atender requisitos não funcionais:
+
+\begin{itemize}
+    \item \textbf{isolamento}: cada nó deve executar em processo e contêiner próprios;
+    \item \textbf{reprodutibilidade}: a pilha deve ser iniciada por Docker Compose;
+    \item \textbf{observabilidade}: mensagens, transições e falhas devem aparecer nos logs e endpoints;
+    \item \textbf{determinismo de prioridade}: empates devem ser resolvidos pelo identificador do nó;
+    \item \textbf{testabilidade}: regras puras e transições de estado devem possuir testes unitários;
+    \item \textbf{rastreabilidade}: decisões e adaptações devem ser relacionadas às fontes e aos arquivos do projeto.
+\end{itemize}
+
+\subsection{Relógios lógicos de Lamport}
+
+Lamport define a relação \emph{happened-before}, denotada por $a \rightarrow b$, para expressar que o evento $a$ pode ter influenciado o evento $b$ \cite{lamport1978}. A relação inclui a ordem local de eventos em um processo, o envio antes do recebimento da mesma mensagem e o fechamento transitivo dessas relações.
+
+A condição que um relógio lógico deve preservar é:
+
+\begin{equation}
+    a \rightarrow b \Rightarrow C(a) < C(b).
+    \label{eq:clock-condition}
+\end{equation}
+
+A recíproca não é garantida: $C(a) < C(b)$ não prova que $a \rightarrow b$. Dois eventos concorrentes podem receber timestamps diferentes apenas porque os relógios locais evoluíram de forma distinta.
+
+A concretização inteira empregada pelo projeto utiliza duas operações:
+
+\begin{align}
+    C_i &\leftarrow C_i + 1 && \text{em evento local ou envio;} \\
+    C_i &\leftarrow \max(C_i, t_m) + 1 && \text{ao receber mensagem com timestamp } t_m.
+\end{align}
+
+O timestamp inserido na mensagem é o valor do relógio no evento de envio. A granularidade de evento é uma escolha de implementação; por isso, o projeto distingue eventos que avançam o relógio de anotações que apenas detalham o mesmo acontecimento.
+
+\subsection{Exclusão mútua de Ricart--Agrawala}
+
+No algoritmo de Ricart--Agrawala, um processo que deseja entrar na seção crítica envia um pedido aos demais participantes e aguarda uma resposta de cada um \cite{ricart1981}. Pedidos concorrentes são ordenados pelo par:
+
+\begin{equation}
+    (timestamp\_do\_pedido, identificador\_do\_processo).
+\end{equation}
+
+O menor par tem prioridade. Um receptor responde imediatamente quando não disputa o recurso ou quando o pedido remoto tem prioridade. Caso esteja na seção crítica, ou possua um pedido local prioritário, adia a resposta até a liberação.
+
+Para $N$ participantes, uma solicitação bem-sucedida e sem falhas utiliza:
+
+\begin{equation}
+    (N-1)\ \text{REQUESTs} + (N-1)\ \text{REPLYs} = 2(N-1)
+    \label{eq:ra-messages}
+\end{equation}
+
+mensagens do protocolo. No cenário com três nós, o valor esperado é quatro. O timeout local implementado no projeto evita espera infinita em testes, mas não torna o algoritmo tolerante a falhas.
+
+\subsection{Eleição pelo algoritmo Bully}
+
+O algoritmo Bully parte de processos com identificadores totalmente ordenados. Quando um processo detecta a falha do coordenador, envia uma eleição apenas aos processos com identificador maior. Se nenhum deles responder, torna-se coordenador; se algum responder, aguarda o anúncio de um vencedor superior \cite{garcia1982}.
+
+O projeto usa os tipos \code{ELECTION}, \code{ELECTION_OK} e \code{COORDINATOR} para representar esse fluxo. Dois elementos são adaptações locais:
+
+\begin{itemize}
+    \item \code{HEARTBEAT}, usado para detecção periódica de falha;
+    \item \code{election_id}, usado para rejeitar respostas antigas ou duplicadas de uma rodada local.
+\end{itemize}
+
+A implementação assume falha por parada, posterior recuperação e atrasos limitados o suficiente para que os timeouts tenham significado. Ela não oferece tolerância a partições de rede.
+
+\subsection{Escopo e exclusões}
+
+Permanecem fora do escopo:
+
+\begin{itemize}
+    \item consenso por Paxos ou Raft;
+    \item replicação de dados e persistência durável;
+    \item membership dinâmico;
+    \item autenticação e autorização;
+    \item tolerância a partições e atrasos arbitrários;
+    \item banco de dados, filas externas, Kubernetes, frontend ou dashboard.
+\end{itemize}
+
+Essas exclusões evitam misturar problemas diferentes e preservam o foco nos três algoritmos estudados.

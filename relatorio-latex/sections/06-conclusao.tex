@@ -1,20 +1,36 @@
 \section{Conclusão}
+\label{sec:conclusao}
 
-O projeto chegou a uma versão funcional e documentada de um sistema distribuído didático.
-Foram implementados os três pilares esperados do trabalho: comunicação entre nós, exclusão mútua distribuída e eleição de líder.
-A revisão recente também corrigiu a parte mais sensível para auditoria: prioridade do Bully, classificação dos eventos, rastreabilidade das fontes e política de resultados.
+O trabalho produziu uma implementação integrada de conceitos clássicos de sistemas distribuídos em uma pilha pequena e reproduzível. Os três nós executam processos independentes, trocam mensagens HTTP/JSON e mantêm estado exclusivamente local. Sobre essa base foram construídos o relógio lógico de Lamport, a exclusão mútua de Ricart--Agrawala e uma adaptação do algoritmo Bully.
 
-Do ponto de vista técnico, os principais ganhos foram:
+Do ponto de vista de engenharia, os principais resultados são:
 
 \begin{itemize}
-    \item uso real de HTTP/JSON entre contêineres;
-    \item controle de estado local por nó;
-    \item validação por testes unitários e smoke tests;
-    \item coleta de experimentos com rastreabilidade;
-    \item documentação das decisões de projeto.
+    \item um envelope comum para mensagens de aplicação, mutex e eleição;
+    \item atualização consistente do relógio em eventos locais, envios e recebimentos;
+    \item separação explícita entre eventos Lamport e anotações de observabilidade;
+    \item prioridade determinística de pedidos por timestamp e ID;
+    \item observação externa da seção crítica sem centralizar a autorização;
+    \item eleição, detecção de parada e recuperação do maior identificador;
+    \item rejeição de coordenadores e heartbeats inferiores ao próprio nó ou ao líder conhecido;
+    \item testes unitários, smoke tests e experimentos com artefatos versionados.
 \end{itemize}
 
-Como limite assumido desde o início, o trabalho não tenta resolver consenso, particionamento de rede ou persistência durável.
-Esses itens ficaram fora do escopo para preservar foco e coerência com o enunciado.
+O relatório também esclarece duas interpretações incorretas. Primeiro, o histórico de \code{/events} não é uma sequência um-para-um de eventos teóricos: anotações podem compartilhar o timestamp do acontecimento que descrevem. Segundo, os timeouts empregados no mutex e na eleição são hipóteses operacionais da demonstração, não garantias de tolerância a falhas em um sistema assíncrono arbitrário.
 
-Em resumo, o que já foi feito até aqui forma uma base sólida para demonstrar conceitos clássicos de sistemas distribuídos com execução local reproduzível e clareza suficiente para avaliação acadêmica.
+Os resultados experimentais são coerentes com os comportamentos esperados: zero violações causais no cenário monitorado, quatro mensagens para um pedido individual de mutex com três nós, nenhuma sobreposição observada na seção crítica e convergência do líder após parada e recuperação.
+
+\subsection{Limitações e possíveis extensões}
+
+O sistema continua limitado a participantes fixos, estado volátil, rede local e falha por parada. Não há solução para partições, consenso, replicação ou persistência. Como extensões futuras, seria possível:
+
+\begin{itemize}
+    \item introduzir testes de caos para atraso, perda e reordenação de mensagens;
+    \item reutilizar um \code{httpx.AsyncClient} de longa duração para pooling de conexões;
+    \item ampliar os experimentos e reportar intervalos de confiança;
+    \item adicionar identificadores de época mais fortes ao subsistema de eleição;
+    \item comparar o Bully com um protocolo de consenso ou uma eleição baseada em log, mantendo clara a mudança de escopo;
+    \item adicionar persistência apenas para fins de recuperação, sem confundi-la com o estado compartilhado proibido no núcleo da atividade.
+\end{itemize}
+
+Dentro do escopo proposto, a implementação oferece uma demonstração clara da relação entre teoria, mensagens reais, estado local e comportamento observável. O conjunto formado por código, testes, scripts, documentação e resultados permite reproduzir os cenários e discutir tanto as propriedades alcançadas quanto as garantias que permanecem fora do modelo.
